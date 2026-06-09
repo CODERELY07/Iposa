@@ -15,3 +15,8 @@ export type Product = {
   created_at: string
   categories?: { name: string } | null
 }
+
+export type CartItem = {
+  product: Product
+  quantity: number
+}
