@@ -169,13 +169,14 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
     // Update local state inventory counts instantly to reflect the sale
     setProducts(prevProducts =>
       prevProducts.map(prod => {
-        const soldItem = cart.find(item => item.product.id === prod.id)
+        const soldItem = cart.find(item => item.product.id === prod.id);
+        console.log(soldItem);
         return soldItem ? { ...prod, stock: Math.max(0, prod.stock - soldItem.quantity) } : prod
       })
     )
 
     setSuccessMessage(`Sale completed successfully! Reference ID: #${saleId}`)
-    clearCart()
+    clearCart();
     setLoading(false)
   }
 

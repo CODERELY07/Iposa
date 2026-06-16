@@ -23,6 +23,7 @@ type Props = {
   categoryShares: { name: string; value: number }[]
   lowStockIngredients: { name: string; current_stock: number; min_stock_alert: number }[]
   ingredientsCostList: { name: string; cost: number }[]
+  startOfToday: string
   kpis: {
     grossRevenue: number
     totalCOGS: number
@@ -30,11 +31,14 @@ type Props = {
     totalOpEx: number
     netProfit: number
     profitMarginPercentage: number
+    todayRevenue: number
+    todayProfit: number
   }
 }
 
-export default function AnalyticsClient({ salesRaw, topProducts, categoryShares, lowStockIngredients, ingredientsCostList, kpis }: Props) {
+export default function AnalyticsClient({ salesRaw, topProducts, categoryShares, lowStockIngredients, ingredientsCostList, startOfToday, kpis }: Props) {
   
+  // Computes the past 7 days of sales for trend monitoring
   const revenueChartData = useMemo(() => {
     const daysMap: Record<string, number> = {}
     for (let i = 6; i >= 0; i--) {
@@ -76,27 +80,45 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 bg-zinc-50 min-h-[calc(100vh-4rem)]">
       
-      <div>
-        <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Executive Analytics Ledger</h1>
-        <p className="text-xs text-zinc-500 mt-0.5">Real-time performance metrics tracking dynamic item recipes, standalone COGS adjustments, and monthly net margins.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Executive Analytics Ledger</h1>
+          <p className="text-xs text-zinc-500 mt-0.5">Real-time performance metrics tracking dynamic item recipes, daily isolated windows, and monthly net margins.</p>
+        </div>
+        
+        {/* 🌤️ LIVE DAILY COUNTER (Resets automatically at midnight) */}
+        <div className="flex gap-2 bg-indigo-50 border border-indigo-100 p-3 rounded-xl shadow-xs">
+          <div className="pr-4 border-r border-indigo-200/60">
+            <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-wider block">Today's Live Sales</span>
+            <h4 className="text-sm font-mono font-black text-indigo-700 mt-0.5">
+              ₱{kpis.todayRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            </h4>
+          </div>
+          <div className="pl-2">
+            <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-wider block">Today's Net Margin</span>
+            <h4 className="text-sm font-mono font-black text-emerald-600 mt-0.5">
+              ₱{kpis.todayProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            </h4>
+          </div>
+        </div>
       </div>
 
-      {/* FINANCIAL METRICS SUMMARY BOARD */}
+      {/* FINANCIAL METRICS SUMMARY BOARD (Monthly) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
         <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm">
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">1. Gross Revenue</span>
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">1. Monthly Gross Revenue</span>
           <h3 className="text-lg font-mono font-bold text-zinc-900 mt-1">₱{kpis.grossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
           <span className="text-[10px] text-zinc-400">Total volume sold</span>
         </div>
 
         <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-red-400">
-          <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">2. Total COGS</span>
+          <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">2. Monthly COGS</span>
           <h3 className="text-lg font-mono font-bold text-red-600 mt-1">₱{kpis.totalCOGS.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
           <span className="text-[10px] text-zinc-400">Recipe + direct costs</span>
         </div>
 
         <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-blue-500">
-          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">3. Gross Profit</span>
+          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">3. Monthly Gross Profit</span>
           <h3 className="text-lg font-mono font-bold text-blue-600 mt-1">₱{kpis.grossProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
           <span className="text-[10px] text-zinc-500">Revenue minus COGS</span>
         </div>
@@ -108,7 +130,7 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
         </div>
 
         <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-emerald-500">
-          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">5. True Net Profit</span>
+          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">5. Monthly Net Profit</span>
           <h3 className="text-lg font-mono font-bold text-emerald-600 mt-1">₱{kpis.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
           <span className="text-[10px] text-zinc-500">Clean cash remaining</span>
         </div>
@@ -143,10 +165,8 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
         </div>
       </div>
 
-      {/* ADVANCED PROFIT AND INVENTORY AUDITING GRID */}
+      {/* PRODUCT PROFIT AND INVENTORY AUDITING GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* PRODUCT PROFIT MARGIN LEDGER */}
         <div className="lg:col-span-2 bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
           <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3">Product Volume & Margins Breakdown</h3>
           <div className="overflow-x-auto">
@@ -177,10 +197,7 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
           </div>
         </div>
 
-        {/* ALERTS AND BASE RAW RESOURCE PARAMETERS */}
         <div className="space-y-6">
-          
-          {/* CRITICAL STOCK LEDGER */}
           <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
             <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3 text-red-600">Critical Ingredients Warning ({lowStockIngredients.length})</h3>
             <div className="space-y-2 max-h-44 overflow-y-auto">
@@ -201,7 +218,6 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
             </div>
           </div>
 
-          {/* BASE INGREDIENTS RAW VALUATION INDEX */}
           <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
             <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3 text-blue-600">Raw Component Pricing Matrix</h3>
             <div className="space-y-1.5 max-h-44 overflow-y-auto font-medium text-xs">
@@ -213,11 +229,8 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
               ))}
             </div>
           </div>
-
         </div>
-
       </div>
-
     </div>
   )
 }
