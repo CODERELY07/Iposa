@@ -1,10 +1,11 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, requireUserRole } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import ProductsClient from '@/components/inventory/ProductsClient'
 
 export const revalidate = 0
 
 export default async function ProductsPage() {
+  await requireUserRole(['admin'])
   const supabase = await createClient()
 
   // Concurrently load all models to avoid network waterfalls

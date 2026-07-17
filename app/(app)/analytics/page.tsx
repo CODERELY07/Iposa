@@ -1,9 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, requireUserRole } from '@/lib/supabase/server'
 import AnalyticsClient from '@/components/inventory/AnalyticsClient'
 
 export const revalidate = 0
 
 export default async function AnalyticsPage() {
+  await requireUserRole(['admin'])
   const supabase = await createClient()
   
   const now = new Date()

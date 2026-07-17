@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import { requireUserRole } from '@/lib/supabase/server'
 
-export default function HomePage() {
+export default async function HomePage() {
+  await requireUserRole(['admin'])
   const features = [
     {
       icon: '📦',

@@ -1,8 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, requireUserRole } from '@/lib/supabase/server'
 
 export const revalidate = 0 // Ensure metrics update live on every navigation click
 
 export default async function DashboardPage() {
+  await requireUserRole(['admin'])
   const supabase = await createClient()
 
   // Generate an ISO string timestamp for the start of today (00:00:00 local time)

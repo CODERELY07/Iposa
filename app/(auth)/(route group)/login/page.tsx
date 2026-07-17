@@ -1,6 +1,6 @@
 'use client'
 
-import { useState,useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -13,20 +13,16 @@ export default function SignInPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  
   useEffect(() => {
     async function checkAuth() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         console.log('User is authenticated:', user)
-      } else {
-        console.log('No authenticated user found.')
       }
     }
     checkAuth()
   }, [supabase])
 
-  
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -35,62 +31,52 @@ export default function SignInPage() {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
-    });
+    })
 
-    console.log(data, error);
     if (error) {
       setError('Invalid email or password. Please try again.')
       setLoading(false)
       return
     }
 
-    router.push('/home')
-    router.refresh()
+    const userId = data.user?.id
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId!)
+      .single()
+
+    setLoading(false)
+
+    if (profileError || !profile?.role) {
+      setError('Unable to determine access role. Contact your administrator.')
+      return
+    }
+
+    const destination = profile.role === 'staff' || profile.role === 'cashier' ? '/pos' : '/dashboard'
+    router.push(destination)
+    router.refresh() // Good practice to refresh state after auth
   }
 
   return (
-    <div className="w-full max-w-sm bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm">
-      <p className="text-xs font-semibold tracking-widest uppercase text-emerald-700 mb-2">
-        Welcome back
-      </p>
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Sign in</h1>
-      <p className="text-sm text-zinc-500 mb-7">
-        Enter your credentials to access your account.
-      </p>
-
-      {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2.5 mb-5">
-          <span className="mt-px">⚠</span>
-          <span>{error}</span>
-        </div>
-      )}
-
+    <div className="max-w-md w-full">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-1.5">
-          <label htmlFor="email" className="block text-sm font-medium text-zinc-700">
-            Email
-          </label>
+        {error && <p className="text-red-500 text-sm">{error}</p>}
+        
+        <div>
+          <label htmlFor="email">Email</label>
           <input
             id="email"
             type="email"
-            autoComplete="email"
             required
-            placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
+            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5"
           />
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-baseline">
-            <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
-              Password
-            </label>
-            <a href="/reset-password" className="text-xs text-zinc-400 hover:text-emerald-700 transition">
-              Forgot password?
-            </a>
-          </div>
+        <div>
+          <label htmlFor="password">Password</label>
           <input
             id="password"
             type="password"
@@ -99,14 +85,14 @@ export default function SignInPage() {
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
+            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed"
+          className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition"
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>

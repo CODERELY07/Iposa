@@ -10,35 +10,31 @@ export async function voidTransactionAction(saleId: number, pinCode: string) {
         return { success: false, message: 'Invalid format. PIN must be 4 digits.' }
     }
 
-    // 1. Authenticate PIN against the security ledger table
+   // 1. Authenticate PIN against the security ledger table
     const { data: managerProfile, error: profileError } = await supabase
         .from('profiles')
         .select('role')
         .eq('manager_pin', pinCode)
-        .eq('role', 'user')
-        .single();
+        .eq('role', 'admin')
+        .maybeSingle(); // Change .single() to .maybeSingle()
 
+
+// Now check if managerProfile is null to handle the failure gracefully
+if (profileError || !managerProfile) {
+    console.log(managerProfile);
+    console.log("❌ VOID TRANSACTION PIN FAILURE LOG:", {
+        dbError: profileError,
+        foundPayload: managerProfile,
+        submittedPin: pinCode
+    });
     
-
-    if (profileError || !managerProfile) {
-        console.error("❌ VOID TRANSACTION PIN FAILURE LOG:", {
-            dbError: profileError,
-            foundPayload: managerProfile,
-            submittedPin: pinCode
-        });
-        
-        return { 
-            success: false, 
-            message: profileError 
-                ? `Database Error: ${profileError.message}` 
-                : 'Authentication Failure: PIN does not match an authorized account record.',
-            debugDetails: {
-                hasError: !!profileError,
-                foundRecord: !!managerProfile,
-                receivedPinLength: pinCode?.length
-            }
-        };
-    }
+    return { 
+        success: false, 
+        message: profileError 
+            ? `Database Error: ${profileError.message}` 
+            : 'Authentication Failure: PIN does not match an authorized account record.'
+    };
+}
 
 // 2. Erase record. ON DELETE CASCADE cleans up sale_items, 
 // triggering the DB function to restore stock automatically.
