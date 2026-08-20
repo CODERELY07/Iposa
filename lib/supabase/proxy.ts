@@ -32,48 +32,33 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // Do not run code between createServerClient and
-  // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
-
-  // IMPORTANT: If you remove getClaims() and you use server-side rendering
+  // IMPORTANT: If you remove getUser() and you use server-side rendering
   // with the Supabase client, your users may be randomly logged out.
- const {
+  const {
     data: { user },
   } = await supabase.auth.getUser()
 
   // PROTECTED ROUTES LOGIC
-  const isHomePage = request.nextUrl.pathname === '/'
+  // Include /home alongside root / so it doesn't trigger unexpected 307 redirects
+  const isHomePage = request.nextUrl.pathname === '/' || request.nextUrl.pathname === '/home'
   const isAuthRoute = 
     request.nextUrl.pathname.startsWith('/login') || 
     request.nextUrl.pathname.startsWith('/signup') ||
     request.nextUrl.pathname.startsWith('/auth')
 
+  // If user is not logged in and tries to access a protected page, send to /login
   if (!user && !isHomePage && !isAuthRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // If user IS logged in and tries to access /login, send them to /home
+  // If user IS logged in and tries to access /login, send them to /dashboard (matching your sign-in logic)
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone()
-    url.pathname = '/home'
+    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
-  // creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
 
   return supabaseResponse
 }

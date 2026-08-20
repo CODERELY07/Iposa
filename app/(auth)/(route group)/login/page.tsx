@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
+// Create the client once outside the component to prevent unstable references
+const supabase = createClient()
+
 export default function SignInPage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,7 +23,7 @@ export default function SignInPage() {
       }
     }
     checkAuth()
-  }, [supabase])
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -55,7 +57,7 @@ export default function SignInPage() {
 
     const destination = profile.role === 'staff' || profile.role === 'cashier' ? '/pos' : '/dashboard'
     router.push(destination)
-    router.refresh() // Good practice to refresh state after auth
+    router.refresh()
   }
 
   return (
