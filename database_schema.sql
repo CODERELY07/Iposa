@@ -32,10 +32,24 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- 'admin' / 'staff' / 'cashier' are kept in the check constraint only for
 -- backwards compatibility with any pre-existing rows; nothing in the app
 -- assigns them anymore. A business owner is 'business_admin'; the
--- marketplace operator is 'super_admin'; everyone else is 'customer'.
+-- marketplace operator is 'super_admin'; a promoter is 'affiliate';
+-- everyone else is 'customer'.
+--
+-- Re-adding a CHECK constraint re-validates every existing row, so a single
+-- stray/legacy value (a manual edit, an old experiment, a row from before
+-- this list existed) would abort the whole script with "check constraint ...
+-- is violated by some row" on every future re-run. Coerce anything outside
+-- the allowed set back to the 'customer' default first so this section stays
+-- truly idempotent; if that's ever unexpected for a specific user, fix their
+-- role by hand afterward.
+UPDATE public.profiles
+SET role = 'customer'
+WHERE role IS NOT NULL
+  AND role NOT IN ('admin', 'staff', 'cashier', 'super_admin', 'business_admin', 'customer', 'affiliate');
+
 ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
 ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check
-  CHECK (role IN ('admin', 'staff', 'cashier', 'super_admin', 'business_admin', 'customer'));
+  CHECK (role IN ('admin', 'staff', 'cashier', 'super_admin', 'business_admin', 'customer', 'affiliate'));
 ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'customer';
 
 CREATE OR REPLACE FUNCTION public.current_user_role()
@@ -963,3 +977,623 @@ CREATE POLICY "store_order_items_select_participant" ON public.store_order_items
 -- =============================================================================
 
 DROP TABLE IF EXISTS public.products CASCADE;
+
+-- =============================================================================
+-- SECTION 10 — AFFILIATE PROGRAM
+-- A separate role ('affiliate') for promoters who are neither shoppers nor
+-- shop owners. Mirrors the businesses apply -> pending -> super_admin
+-- approval flow exactly. Commission rates are per-business (each shop owner
+-- opts in via `business_affiliate_settings` and sets their own rate), not a
+-- single platform-wide rate.
+-- =============================================================================
+
+-- 'affiliate' is already part of profiles_role_check — see Section 1, the
+-- single source of truth for that constraint (and the row-sanitizing update
+-- that keeps re-running it safe).
+
+-- ---- affiliates (one application/profile per promoter) ----
+CREATE TABLE IF NOT EXISTS public.affiliates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
+  full_name text NOT NULL,
+  code text NOT NULL UNIQUE,
+  payout_method text,
+  payout_details text,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  rejection_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS affiliates_status_idx ON public.affiliates(status);
+CREATE INDEX IF NOT EXISTS affiliates_code_idx ON public.affiliates(code);
+
+DROP TRIGGER IF EXISTS trg_affiliates_updated_at ON public.affiliates;
+CREATE TRIGGER trg_affiliates_updated_at
+  BEFORE UPDATE ON public.affiliates
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- Only a super_admin may change `status`, same defense-in-depth as
+-- protect_business_status() above.
+CREATE OR REPLACE FUNCTION public.protect_affiliate_status()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status AND public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can change an affiliate status';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_affiliate_status ON public.affiliates;
+CREATE TRIGGER trg_protect_affiliate_status
+  BEFORE UPDATE ON public.affiliates
+  FOR EACH ROW EXECUTE FUNCTION public.protect_affiliate_status();
+
+-- ---- business_affiliate_settings (each shop opts in and sets its own rate) ----
+CREATE TABLE IF NOT EXISTS public.business_affiliate_settings (
+  business_id uuid PRIMARY KEY REFERENCES public.businesses(id) ON DELETE CASCADE,
+  enabled boolean NOT NULL DEFAULT false,
+  commission_rate numeric(5,2) NOT NULL DEFAULT 5.00 CHECK (commission_rate >= 0 AND commission_rate <= 100),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+DROP TRIGGER IF EXISTS trg_business_affiliate_settings_updated_at ON public.business_affiliate_settings;
+CREATE TRIGGER trg_business_affiliate_settings_updated_at
+  BEFORE UPDATE ON public.business_affiliate_settings
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ---- affiliate_clicks (referral-link visits, for the affiliate's own stats) ----
+CREATE TABLE IF NOT EXISTS public.affiliate_clicks (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
+  business_id uuid REFERENCES public.businesses(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS affiliate_clicks_affiliate_id_idx ON public.affiliate_clicks(affiliate_id);
+
+-- ---- affiliate_payouts (created before affiliate_commissions, which references it) ----
+CREATE TABLE IF NOT EXISTS public.affiliate_payouts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
+  amount numeric(10,2) NOT NULL,
+  status text NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'paid', 'rejected')),
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  paid_at timestamptz,
+  notes text
+);
+CREATE INDEX IF NOT EXISTS affiliate_payouts_affiliate_id_idx ON public.affiliate_payouts(affiliate_id);
+
+-- ---- affiliate_commissions (one row per referring affiliate per order, lifecycle tracked via `status`) ----
+-- pending (order just placed) -> approved (order marked completed) or void
+-- (order cancelled) -> paid (once its payout is marked paid).
+-- `referred_subtotal` is the subtotal of just the items that carried this
+-- affiliate's code when they were added to the cart, not the whole order —
+-- see place_order() below.
+CREATE TABLE IF NOT EXISTS public.affiliate_commissions (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
+  order_id uuid NOT NULL REFERENCES public.store_orders(id) ON DELETE CASCADE,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  referred_subtotal numeric(10,2) NOT NULL,
+  commission_rate numeric(5,2) NOT NULL,
+  commission_amount numeric(10,2) NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'void', 'paid')),
+  payout_id uuid REFERENCES public.affiliate_payouts(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (affiliate_id, order_id)
+);
+-- Renamed from `order_subtotal`: CREATE TABLE IF NOT EXISTS is a no-op
+-- against a table an earlier run of this file already created, so the
+-- column rename above never reaches an existing database on its own —
+-- do it explicitly, guarded so this stays safe to re-run either way.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'affiliate_commissions' AND column_name = 'order_subtotal'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'affiliate_commissions' AND column_name = 'referred_subtotal'
+  ) THEN
+    ALTER TABLE public.affiliate_commissions RENAME COLUMN order_subtotal TO referred_subtotal;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS affiliate_commissions_affiliate_id_idx ON public.affiliate_commissions(affiliate_id);
+CREATE INDEX IF NOT EXISTS affiliate_commissions_order_id_idx ON public.affiliate_commissions(order_id);
+CREATE INDEX IF NOT EXISTS affiliate_commissions_payout_id_idx ON public.affiliate_commissions(payout_id);
+
+DROP TRIGGER IF EXISTS trg_affiliate_commissions_updated_at ON public.affiliate_commissions;
+CREATE TRIGGER trg_affiliate_commissions_updated_at
+  BEFORE UPDATE ON public.affiliate_commissions
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ---- RPCs ----
+
+-- A logged-in customer applies to become an affiliate. Flips their own role
+-- to 'affiliate' and creates a `pending` affiliate profile with a unique
+-- referral code, in one atomic step (mirrors register_business()). Only
+-- plain customers may apply — a shop owner becoming an affiliate too would
+-- open the door to self-referral (crediting themselves a commission on
+-- their own shop's sales), and a profile has exactly one role at a time.
+CREATE OR REPLACE FUNCTION public.register_affiliate(p_full_name text, p_payout_method text DEFAULT NULL, p_payout_details text DEFAULT NULL)
+RETURNS public.affiliates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_role text;
+  v_code text;
+  v_affiliate public.affiliates;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT role INTO v_role FROM public.profiles WHERE id = v_uid;
+
+  IF v_role IS NULL THEN
+    RAISE EXCEPTION 'Profile not found';
+  END IF;
+
+  IF v_role <> 'customer' THEN
+    RAISE EXCEPTION 'Only customer accounts can apply to become an affiliate';
+  END IF;
+
+  IF p_full_name IS NULL OR length(trim(p_full_name)) = 0 THEN
+    RAISE EXCEPTION 'Full name is required';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.affiliates WHERE user_id = v_uid) THEN
+    RAISE EXCEPTION 'You already have an affiliate application';
+  END IF;
+
+  LOOP
+    v_code := lower(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.affiliates WHERE code = v_code);
+  END LOOP;
+
+  UPDATE public.profiles SET role = 'affiliate' WHERE id = v_uid;
+
+  INSERT INTO public.affiliates (user_id, full_name, code, payout_method, payout_details, status)
+  VALUES (v_uid, trim(p_full_name), v_code, p_payout_method, p_payout_details, 'pending')
+  RETURNING * INTO v_affiliate;
+
+  RETURN v_affiliate;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.register_affiliate(text, text, text) TO authenticated;
+
+-- A super_admin approves or rejects a pending affiliate application.
+CREATE OR REPLACE FUNCTION public.set_affiliate_status(p_affiliate_id uuid, p_status text, p_rejection_reason text DEFAULT NULL)
+RETURNS public.affiliates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_affiliate public.affiliates;
+BEGIN
+  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can review affiliate applications';
+  END IF;
+
+  IF p_status NOT IN ('approved', 'rejected') THEN
+    RAISE EXCEPTION 'Invalid status: %', p_status;
+  END IF;
+
+  UPDATE public.affiliates
+  SET status = p_status,
+      rejection_reason = CASE WHEN p_status = 'rejected' THEN p_rejection_reason ELSE NULL END
+  WHERE id = p_affiliate_id
+  RETURNING * INTO v_affiliate;
+
+  IF v_affiliate IS NULL THEN
+    RAISE EXCEPTION 'Affiliate application not found';
+  END IF;
+
+  RETURN v_affiliate;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.set_affiliate_status(uuid, text, text) TO authenticated;
+
+-- Records a referral-link visit. Callable by anon (a visitor need not be
+-- logged in to click a link) and authenticated alike. Silently no-ops on an
+-- unknown/unapproved code instead of raising, so a stale or mistyped `?ref=`
+-- never breaks the page it's attached to or leaks which codes are valid.
+CREATE OR REPLACE FUNCTION public.track_affiliate_referral_click(p_code text, p_business_slug text DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_affiliate_id uuid;
+  v_business_id uuid;
+BEGIN
+  IF p_code IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT id INTO v_affiliate_id FROM public.affiliates WHERE code = lower(p_code) AND status = 'approved';
+  IF v_affiliate_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  IF p_business_slug IS NOT NULL THEN
+    SELECT id INTO v_business_id FROM public.businesses WHERE slug = p_business_slug AND status = 'approved';
+  END IF;
+
+  INSERT INTO public.affiliate_clicks (affiliate_id, business_id) VALUES (v_affiliate_id, v_business_id);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.track_affiliate_referral_click(text, text) TO anon, authenticated;
+
+-- An approved affiliate cashes out their payable balance. Sums every
+-- 'approved' commission not yet attached to a payout, and stamps them all
+-- with the new payout's id so they can't be requested twice.
+CREATE OR REPLACE FUNCTION public.request_affiliate_payout()
+RETURNS public.affiliate_payouts
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_affiliate_id uuid;
+  v_amount numeric(10,2);
+  v_payout public.affiliate_payouts;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT id INTO v_affiliate_id FROM public.affiliates WHERE user_id = v_uid AND status = 'approved';
+  IF v_affiliate_id IS NULL THEN
+    RAISE EXCEPTION 'No approved affiliate account found';
+  END IF;
+
+  PERFORM 1 FROM public.affiliate_commissions
+    WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL
+    FOR UPDATE;
+
+  SELECT COALESCE(SUM(commission_amount), 0) INTO v_amount
+    FROM public.affiliate_commissions
+    WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL;
+
+  IF v_amount <= 0 THEN
+    RAISE EXCEPTION 'No payable commissions available to request';
+  END IF;
+
+  INSERT INTO public.affiliate_payouts (affiliate_id, amount, status)
+  VALUES (v_affiliate_id, v_amount, 'requested')
+  RETURNING * INTO v_payout;
+
+  UPDATE public.affiliate_commissions
+  SET payout_id = v_payout.id
+  WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL;
+
+  RETURN v_payout;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.request_affiliate_payout() TO authenticated;
+
+-- A super_admin marks a payout request paid or rejected. 'paid' flips the
+-- linked commissions to 'paid'; 'rejected' unlinks them (back to 'approved',
+-- so they're requestable again in a future payout).
+CREATE OR REPLACE FUNCTION public.set_affiliate_payout_status(p_payout_id uuid, p_status text)
+RETURNS public.affiliate_payouts
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_payout public.affiliate_payouts;
+BEGIN
+  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can review payout requests';
+  END IF;
+
+  IF p_status NOT IN ('paid', 'rejected') THEN
+    RAISE EXCEPTION 'Invalid status: %', p_status;
+  END IF;
+
+  UPDATE public.affiliate_payouts
+  SET status = p_status,
+      paid_at = CASE WHEN p_status = 'paid' THEN now() ELSE NULL END
+  WHERE id = p_payout_id AND status = 'requested'
+  RETURNING * INTO v_payout;
+
+  IF v_payout IS NULL THEN
+    RAISE EXCEPTION 'Payout request not found or already resolved';
+  END IF;
+
+  IF p_status = 'paid' THEN
+    UPDATE public.affiliate_commissions SET status = 'paid' WHERE payout_id = v_payout.id;
+  ELSE
+    UPDATE public.affiliate_commissions SET payout_id = NULL WHERE payout_id = v_payout.id;
+  END IF;
+
+  RETURN v_payout;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.set_affiliate_payout_status(uuid, text) TO authenticated;
+
+-- A completed order makes its referral commission payable; a cancelled one
+-- voids it. Fires regardless of how the order's status changed (the app
+-- updates store_orders.status directly under its owner-scoped RLS policy,
+-- not through an RPC), same trigger-driven style as
+-- restore_stock_on_sale_item_delete() above.
+CREATE OR REPLACE FUNCTION public.sync_affiliate_commission_on_order_status()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.status = 'completed' AND OLD.status IS DISTINCT FROM 'completed' THEN
+    UPDATE public.affiliate_commissions SET status = 'approved' WHERE order_id = NEW.id AND status = 'pending';
+  ELSIF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+    UPDATE public.affiliate_commissions SET status = 'void' WHERE order_id = NEW.id AND status = 'pending';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_affiliate_commission_on_order_status ON public.store_orders;
+CREATE TRIGGER trg_sync_affiliate_commission_on_order_status
+  AFTER UPDATE OF status ON public.store_orders
+  FOR EACH ROW EXECUTE FUNCTION public.sync_affiliate_commission_on_order_status();
+
+-- Extend place_order()'s cart items with a per-line `ref_code`. Attribution
+-- is per item, not per order: a commission only covers the items that
+-- actually carried an affiliate's code at the moment they were added to the
+-- cart (see the product page's Add to Cart/Buy Now handlers) — an item added
+-- with no ref, or added before/after visiting a referral link without acting
+-- on it, is never credited. This keeps the same 5-arg signature as the
+-- original definition earlier in this file, so CREATE OR REPLACE below
+-- truly replaces it rather than creating a parallel overload. The explicit
+-- drop below only matters if an earlier revision of this file (with a
+-- trailing p_ref_code text 6th param) was already applied to this database —
+-- harmless no-op otherwise.
+DROP FUNCTION IF EXISTS public.place_order(jsonb, text, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.place_order(
+  p_items jsonb,
+  p_shipping_name text,
+  p_shipping_phone text,
+  p_shipping_address text,
+  p_notes text DEFAULT NULL
+)
+RETURNS SETOF public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_business_id uuid;
+  v_order_id uuid;
+  v_subtotal numeric(10,2);
+  v_order_ids uuid[] := '{}';
+  v_ref_code text;
+  v_ref_affiliate_id uuid;
+  v_ref_affiliate_user_id uuid;
+  v_ref_commission_rate numeric(5,2);
+  v_ref_business_owner uuid;
+  v_ref_item_subtotal numeric(10,2);
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Cart is empty';
+  END IF;
+
+  CREATE TEMPORARY TABLE _cart_items (
+    product_id bigint,
+    quantity integer,
+    ref_code text
+  ) ON COMMIT DROP;
+
+  INSERT INTO _cart_items (product_id, quantity, ref_code)
+  SELECT
+    (elem->>'product_id')::bigint,
+    (elem->>'quantity')::integer,
+    NULLIF(lower(elem->>'ref_code'), '')
+  FROM jsonb_array_elements(p_items) AS elem;
+
+  IF EXISTS (SELECT 1 FROM _cart_items WHERE quantity <= 0 OR product_id IS NULL) THEN
+    RAISE EXCEPTION 'Invalid quantity in cart';
+  END IF;
+
+  -- Lock the rows we're about to sell against concurrent checkouts.
+  PERFORM 1 FROM public.store_products p
+    JOIN _cart_items c ON c.product_id = p.id
+    FOR UPDATE OF p;
+
+  PERFORM 1 FROM public.ingredients i
+    JOIN public.recipes r ON r.ingredient_id = i.id
+    JOIN _cart_items c ON c.product_id = r.product_id
+    FOR UPDATE OF i;
+
+  -- Standalone products are checked against their own stock. Recipe-based
+  -- products are skipped here — their `stock` column is always kept at 0 by
+  -- convention, so checking it directly would reject every recipe-based order.
+  IF EXISTS (
+    SELECT 1
+    FROM _cart_items c
+    LEFT JOIN public.store_products p ON p.id = c.product_id
+    LEFT JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id IS NULL
+       OR p.is_active = false
+       OR b.status <> 'approved'
+       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  -- Recipe-based products are checked against ingredient supply instead,
+  -- aggregated per ingredient (see process_sale() for why this can't be
+  -- checked per-product independently).
+  IF EXISTS (
+    SELECT r.ingredient_id
+    FROM _cart_items c
+    JOIN public.recipes r ON r.product_id = c.product_id
+    JOIN public.ingredients i ON i.id = r.ingredient_id
+    GROUP BY r.ingredient_id, i.current_stock
+    HAVING SUM(r.quantity_used * c.quantity) > i.current_stock
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  FOR v_business_id IN
+    SELECT DISTINCT p.business_id
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+  LOOP
+    SELECT COALESCE(SUM(c.quantity * p.price), 0)
+      INTO v_subtotal
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id
+      WHERE p.business_id = v_business_id;
+
+    INSERT INTO public.store_orders (business_id, customer_id, status, subtotal, total, shipping_name, shipping_phone, shipping_address, notes)
+    VALUES (v_business_id, v_uid, 'pending', v_subtotal, v_subtotal, p_shipping_name, p_shipping_phone, p_shipping_address, p_notes)
+    RETURNING id INTO v_order_id;
+
+    INSERT INTO public.store_order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+    SELECT v_order_id, p.id, p.name, c.quantity, p.price, c.quantity * p.price
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+    WHERE p.business_id = v_business_id;
+
+    UPDATE public.store_products p
+    SET stock = p.stock - c.quantity
+    FROM _cart_items c
+    WHERE p.id = c.product_id
+      AND p.business_id = v_business_id
+      AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
+
+    UPDATE public.ingredients i
+    SET current_stock = i.current_stock - agg.total_used
+    FROM (
+      SELECT r.ingredient_id, SUM(r.quantity_used * c.quantity) AS total_used
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id AND p.business_id = v_business_id
+      JOIN public.recipes r ON r.product_id = c.product_id
+      GROUP BY r.ingredient_id
+    ) agg
+    WHERE i.id = agg.ingredient_id;
+
+    -- Credit each distinct referring affiliate for just the items in this
+    -- order that carried their code — never the whole order — unless the
+    -- shop hasn't opted in or the affiliate is the shop's own owner
+    -- (self-referral guard).
+    FOR v_ref_code IN
+      SELECT DISTINCT c.ref_code FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id
+      WHERE p.business_id = v_business_id AND c.ref_code IS NOT NULL
+    LOOP
+      v_ref_affiliate_id := NULL;
+      v_ref_commission_rate := NULL;
+
+      SELECT id, user_id INTO v_ref_affiliate_id, v_ref_affiliate_user_id
+        FROM public.affiliates WHERE code = v_ref_code AND status = 'approved';
+
+      CONTINUE WHEN v_ref_affiliate_id IS NULL;
+
+      SELECT owner_id INTO v_ref_business_owner FROM public.businesses WHERE id = v_business_id;
+
+      SELECT commission_rate INTO v_ref_commission_rate
+        FROM public.business_affiliate_settings
+        WHERE business_id = v_business_id AND enabled = true;
+
+      CONTINUE WHEN v_ref_commission_rate IS NULL OR v_ref_affiliate_user_id IS NOT DISTINCT FROM v_ref_business_owner;
+
+      SELECT COALESCE(SUM(c.quantity * p.price), 0) INTO v_ref_item_subtotal
+        FROM _cart_items c
+        JOIN public.store_products p ON p.id = c.product_id
+        WHERE p.business_id = v_business_id AND c.ref_code = v_ref_code;
+
+      INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, commission_rate, commission_amount, status)
+      VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_commission_rate, round(v_ref_item_subtotal * v_ref_commission_rate / 100, 2), 'pending')
+      ON CONFLICT (affiliate_id, order_id) DO NOTHING;
+    END LOOP;
+
+    v_order_ids := array_append(v_order_ids, v_order_id);
+  END LOOP;
+
+  RETURN QUERY SELECT * FROM public.store_orders WHERE id = ANY(v_order_ids);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_order(jsonb, text, text, text, text) TO authenticated;
+
+-- ---- RLS ----
+
+ALTER TABLE public.affiliates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "affiliates_select_own_or_admin" ON public.affiliates;
+CREATE POLICY "affiliates_select_own_or_admin" ON public.affiliates FOR SELECT
+  USING (user_id = auth.uid() OR public.current_user_role() = 'super_admin');
+-- Row creation/status transitions happen only via register_affiliate() /
+-- set_affiliate_status() (SECURITY DEFINER), so there is no direct write policy.
+
+ALTER TABLE public.business_affiliate_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "business_affiliate_settings_select_enabled_or_owner" ON public.business_affiliate_settings;
+CREATE POLICY "business_affiliate_settings_select_enabled_or_owner" ON public.business_affiliate_settings FOR SELECT
+  USING (
+    enabled = true
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = business_affiliate_settings.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+DROP POLICY IF EXISTS "business_affiliate_settings_write_owner" ON public.business_affiliate_settings;
+CREATE POLICY "business_affiliate_settings_write_owner" ON public.business_affiliate_settings FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = business_affiliate_settings.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin')
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = business_affiliate_settings.business_id AND b.owner_id = auth.uid() AND b.status = 'approved')
+    OR public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.affiliate_clicks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "affiliate_clicks_select_participant" ON public.affiliate_clicks;
+CREATE POLICY "affiliate_clicks_select_participant" ON public.affiliate_clicks FOR SELECT
+  USING (
+    EXISTS (SELECT 1 FROM public.affiliates a WHERE a.id = affiliate_clicks.affiliate_id AND a.user_id = auth.uid())
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = affiliate_clicks.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- No write policy: inserted only via track_affiliate_referral_click() (SECURITY DEFINER).
+
+ALTER TABLE public.affiliate_commissions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "affiliate_commissions_select_participant" ON public.affiliate_commissions;
+CREATE POLICY "affiliate_commissions_select_participant" ON public.affiliate_commissions FOR SELECT
+  USING (
+    EXISTS (SELECT 1 FROM public.affiliates a WHERE a.id = affiliate_commissions.affiliate_id AND a.user_id = auth.uid())
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = affiliate_commissions.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- No write policy: written only via place_order(), the order-status trigger,
+-- and the payout RPCs below (all SECURITY DEFINER).
+
+ALTER TABLE public.affiliate_payouts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "affiliate_payouts_select_own_or_admin" ON public.affiliate_payouts;
+CREATE POLICY "affiliate_payouts_select_own_or_admin" ON public.affiliate_payouts FOR SELECT
+  USING (
+    EXISTS (SELECT 1 FROM public.affiliates a WHERE a.id = affiliate_payouts.affiliate_id AND a.user_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- No write policy: written only via request_affiliate_payout() /
+-- set_affiliate_payout_status() (SECURITY DEFINER).

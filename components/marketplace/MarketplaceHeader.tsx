@@ -24,11 +24,17 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
       {role === 'business_admin' && (
         <Link href="/sell" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">My Store</Link>
       )}
+      {role === 'affiliate' && (
+        <Link href="/affiliate" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">My Affiliate Dashboard</Link>
+      )}
       {role === 'super_admin' && (
         <Link href="/admin/businesses" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Admin</Link>
       )}
       {(role === null || role === 'customer') && (
         <Link href="/register-business" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Sell on Iposa</Link>
+      )}
+      {(role === null || role === 'customer') && (
+        <Link href="/become-affiliate" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Become an Affiliate</Link>
       )}
     </>
   )

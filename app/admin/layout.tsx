@@ -14,9 +14,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </Link>
           <nav className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm font-medium text-zinc-600 overflow-x-auto">
             <Link href="/admin/businesses" className="hover:text-zinc-900 transition whitespace-nowrap">
-              <span className="sm:hidden">Applications</span>
+              <span className="sm:hidden">Businesses</span>
               <span className="hidden sm:inline">Business Applications</span>
             </Link>
+            <Link href="/admin/affiliates" className="hover:text-zinc-900 transition whitespace-nowrap">
+              <span className="sm:hidden">Affiliates</span>
+              <span className="hidden sm:inline">Affiliate Applications</span>
+            </Link>
+            <Link href="/admin/payouts" className="hover:text-zinc-900 transition whitespace-nowrap">Payouts</Link>
             <Link href="/" className="hover:text-zinc-900 transition whitespace-nowrap">Marketplace</Link>
             <SignOutButton className="text-xs font-semibold text-zinc-500 hover:text-red-600 transition cursor-pointer disabled:opacity-50 whitespace-nowrap" />
           </nav>

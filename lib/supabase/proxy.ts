@@ -68,6 +68,27 @@ export async function updateSession(request: NextRequest) {
     return redirectWithSession(url, supabaseResponse)
   }
 
+  // Affiliate referral tracking: `?ref=CODE` on any page records a click for
+  // the affiliate's own stats. This is informational only — it does NOT
+  // grant any commission by itself (no cookie, nothing persisted beyond this
+  // count). Commission attribution instead happens per cart item, stamped
+  // only when a shopper clicks Add to Cart/Buy Now on that exact product's
+  // page while `?ref=` is present in its URL (see ProductPageActions) — a
+  // visit alone (or leaving the page without acting) earns nothing. Best-
+  // effort — an invalid/unknown code or a failed RPC call never blocks the request.
+  const refCode = request.nextUrl.searchParams.get('ref')
+  if (refCode) {
+    const shopMatch = request.nextUrl.pathname.match(/^\/shop\/([^/]+)/)
+    try {
+      await supabase.rpc('track_affiliate_referral_click', {
+        p_code: refCode,
+        p_business_slug: shopMatch ? shopMatch[1] : null,
+      })
+    } catch {
+      // Ignore — tracking is best-effort and must never block navigation.
+    }
+  }
+
   return supabaseResponse
 }
 

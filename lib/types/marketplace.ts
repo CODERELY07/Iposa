@@ -104,6 +104,60 @@ export type StoreOrderItem = {
   subtotal: number
 }
 
+export type AffiliateStatus = 'pending' | 'approved' | 'rejected'
+
+export type Affiliate = {
+  id: string
+  user_id: string
+  full_name: string
+  code: string
+  payout_method: string | null
+  payout_details: string | null
+  status: AffiliateStatus
+  rejection_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type BusinessAffiliateSettings = {
+  business_id: string
+  enabled: boolean
+  commission_rate: number
+  updated_at: string
+}
+
+export type AffiliateCommissionStatus = 'pending' | 'approved' | 'void' | 'paid'
+
+export type AffiliateCommission = {
+  id: number
+  affiliate_id: string
+  order_id: string
+  business_id: string
+  // Subtotal of just the items that were added/bought through this
+  // affiliate's link — not necessarily the whole order's total.
+  referred_subtotal: number
+  commission_rate: number
+  commission_amount: number
+  status: AffiliateCommissionStatus
+  payout_id: string | null
+  created_at: string
+  updated_at: string
+  businesses?: { name: string; slug: string } | null
+}
+
+export type AffiliatePayoutStatus = 'requested' | 'paid' | 'rejected'
+
+export type AffiliatePayout = {
+  id: string
+  affiliate_id: string
+  amount: number
+  status: AffiliatePayoutStatus
+  requested_at: string
+  paid_at: string | null
+  notes: string | null
+  affiliates?: { full_name: string; code: string } | null
+}
+
 export type CartItem = {
   productId: number
   name: string
@@ -112,4 +166,10 @@ export type CartItem = {
   businessId: string
   businessName: string
   quantity: number
+  // Set only when this exact line item was added (or bought) from a
+  // specific product's page while an affiliate's `?ref=` code was present
+  // in that page's URL. Merely browsing a referred link earns nothing —
+  // only committing to Add to Cart/Buy Now on that page does, so this is
+  // stamped at the moment of that action, never persisted independently of it.
+  refCode?: string | null
 }

@@ -23,16 +23,18 @@ export default function ProductCard({ product }: { product: MarketplaceProduct }
     setTimeout(() => setAdded(false), 1200)
   }
 
+  const productHref = `/shop/${product.business_slug}/${product.slug}`
+
   return (
     <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-      <div className="aspect-square bg-zinc-50 flex items-center justify-center overflow-hidden">
+      <Link href={productHref} className="aspect-square bg-zinc-50 flex items-center justify-center overflow-hidden">
         {product.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
         ) : (
           <span className="text-3xl text-zinc-300">📦</span>
         )}
-      </div>
+      </Link>
 
       <div className="p-3.5 flex flex-col gap-1.5 flex-1">
         <Link
@@ -42,7 +44,9 @@ export default function ProductCard({ product }: { product: MarketplaceProduct }
           {product.business_name}
         </Link>
 
-        <h3 className="text-sm font-bold text-zinc-900 leading-snug line-clamp-2">{product.name}</h3>
+        <Link href={productHref}>
+          <h3 className="text-sm font-bold text-zinc-900 leading-snug line-clamp-2 hover:text-blue-600 transition">{product.name}</h3>
+        </Link>
 
         {product.category_name && (
           <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">

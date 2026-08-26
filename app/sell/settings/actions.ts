@@ -35,6 +35,33 @@ export async function updateBusinessSettingsAction(payload: {
   return { success: true as const }
 }
 
+// Upserts this business's affiliate-program settings (one row per business).
+// A plain owner-scoped RLS write, not an RPC — there's no cross-table
+// invariant to protect here, unlike register_business()/process_sale().
+export async function updateAffiliateSettingsAction(payload: { enabled: boolean; commission_rate: number }) {
+  const business = await requireApprovedBusiness()
+  const supabase = await createClient()
+
+  if (!Number.isFinite(payload.commission_rate) || payload.commission_rate < 0 || payload.commission_rate > 100) {
+    return { success: false as const, message: 'Commission rate must be between 0 and 100.' }
+  }
+
+  const { error } = await supabase
+    .from('business_affiliate_settings')
+    .upsert({
+      business_id: business.id,
+      enabled: payload.enabled,
+      commission_rate: payload.commission_rate,
+    })
+
+  if (error) {
+    return { success: false as const, message: error.message }
+  }
+
+  revalidatePath('/sell/settings')
+  return { success: true as const }
+}
+
 // The PIN confirms a void-transaction request in POS Sales History (a
 // deliberate second step, not an authorization handoff — there are no
 // per-business staff accounts yet, so it's always your own account).

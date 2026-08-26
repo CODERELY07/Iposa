@@ -1,7 +1,7 @@
 ﻿import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect, notFound } from 'next/navigation'
-import type { Business } from '@/lib/types/marketplace'
+import type { Business, Affiliate } from '@/lib/types/marketplace'
 
 export async function createClient() {
   const cookieStore = await cookies()
@@ -34,7 +34,7 @@ export async function createClient() {
 // 'business_admin' / 'customer' are the marketplace roles, layered onto the
 // same `profiles.role` column (see database_schema.sql). A profile is
 // exactly one of these at a time.
-export type MarketplaceRole = 'super_admin' | 'business_admin' | 'customer'
+export type MarketplaceRole = 'super_admin' | 'business_admin' | 'customer' | 'affiliate'
 export type UserRole = 'admin' | 'staff' | MarketplaceRole
 
 export async function getCurrentUserRole(): Promise<UserRole | null> {
@@ -66,7 +66,12 @@ export async function getCurrentUserRole(): Promise<UserRole | null> {
     return 'staff'
   }
 
-  if (profile.role === 'super_admin' || profile.role === 'business_admin' || profile.role === 'customer') {
+  if (
+    profile.role === 'super_admin' ||
+    profile.role === 'business_admin' ||
+    profile.role === 'customer' ||
+    profile.role === 'affiliate'
+  ) {
     return profile.role
   }
 
@@ -141,4 +146,42 @@ export async function requireApprovedBusiness(): Promise<Business> {
     redirect('/sell')
   }
   return business
+}
+
+// Gates the /affiliate/* area. Mirrors requireBusinessAccount: does NOT
+// bounce an affiliate whose application is still `pending` or was
+// `rejected` — those are valid states the dashboard itself renders. Only
+// turns away accounts that never applied.
+export async function requireAffiliateAccount(): Promise<{ role: UserRole; affiliate: Affiliate | null }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const role = await getCurrentUserRole()
+  if (role !== 'affiliate' && role !== 'super_admin') {
+    notFound()
+  }
+
+  const { data: affiliate } = await supabase
+    .from('affiliates')
+    .select('*')
+    .eq('user_id', user.id)
+    .maybeSingle<Affiliate>()
+
+  return { role, affiliate: affiliate ?? null }
+}
+
+// For /affiliate/commissions, /affiliate/payouts, etc. — pages that only
+// make sense once an application has been approved.
+export async function requireApprovedAffiliate(): Promise<Affiliate> {
+  const { affiliate } = await requireAffiliateAccount()
+  if (!affiliate || affiliate.status !== 'approved') {
+    redirect('/affiliate')
+  }
+  return affiliate
 }

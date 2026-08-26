@@ -10,8 +10,12 @@ export async function placeOrderAction(
 ) {
   const supabase = await createClient()
 
+  // Each item's ref_code (if any) was stamped client-side at the moment it
+  // was added to the cart from a specific product's page — see
+  // ProductPageActions. place_order() only credits the items that actually
+  // carry one, never the whole order.
   const { data, error } = await supabase.rpc('place_order', {
-    p_items: items.map(i => ({ product_id: i.productId, quantity: i.quantity })),
+    p_items: items.map(i => ({ product_id: i.productId, quantity: i.quantity, ref_code: i.refCode ?? null })),
     p_shipping_name: shipping.name,
     p_shipping_phone: shipping.phone,
     p_shipping_address: shipping.address,

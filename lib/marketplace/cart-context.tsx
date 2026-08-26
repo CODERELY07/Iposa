@@ -51,7 +51,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const existing = prev.find(i => i.productId === item.productId)
       if (existing) {
         return prev.map(i =>
-          i.productId === item.productId ? { ...i, quantity: i.quantity + quantity } : i
+          i.productId === item.productId
+            // A fresh referral tag on a repeat add takes precedence (it's the
+            // most recent "Add to Cart"/"Buy Now" action); adding again with
+            // no ref never erases a referral credit already earned earlier.
+            ? { ...i, quantity: i.quantity + quantity, refCode: item.refCode ?? i.refCode }
+            : i
         )
       }
       return [...prev, { ...item, quantity }]
