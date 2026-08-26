@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 export default function ResetPasswordPage() {
@@ -33,16 +34,16 @@ export default function ResetPasswordPage() {
         <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Email sent</h1>
         <p className="text-sm text-zinc-500 mb-6">
           If <span className="font-medium text-zinc-700">{email}</span> is registered,
-          youll receive a reset link shortly.
+          you&apos;ll receive a reset link shortly.
         </p>
         <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-3 py-2.5">
           <span className="mt-px">✓</span>
-          <span>Check your spam folder if it doesnt arrive within a few minutes.</span>
+          <span>Check your spam folder if it doesn&apos;t arrive within a few minutes.</span>
         </div>
         <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center text-sm">
-          <a href="/sign-in" className="text-emerald-700 font-medium hover:underline">
+          <Link href="/login" className="text-emerald-700 font-medium hover:underline">
             Back to sign in
-          </a>
+          </Link>
         </div>
       </div>
     )
@@ -55,7 +56,7 @@ export default function ResetPasswordPage() {
       </p>
       <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Reset password</h1>
       <p className="text-sm text-zinc-500 mb-7">
-        Enter your email and well send you a link to reset your password.
+        Enter your email and we&apos;ll send you a link to reset your password.
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -83,9 +84,9 @@ export default function ResetPasswordPage() {
       </form>
 
       <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center text-sm">
-        <a href="/sign-in" className="text-emerald-700 font-medium hover:underline">
+        <Link href="/login" className="text-emerald-700 font-medium hover:underline">
           Back to sign in
-        </a>
+        </Link>
       </div>
     </div>
   )

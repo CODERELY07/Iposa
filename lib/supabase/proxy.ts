@@ -39,26 +39,49 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // PROTECTED ROUTES LOGIC
-  // Include /home alongside root / so it doesn't trigger unexpected 307 redirects
-  const isHomePage = request.nextUrl.pathname === '/' || request.nextUrl.pathname === '/home'
-  const isAuthRoute = 
-    request.nextUrl.pathname.startsWith('/login') || 
+  // Public marketplace routes: the homepage, shop pages, and cart are
+  // browsable by anyone. /checkout and /orders are intentionally NOT
+  // included here — placing an order requires being logged in.
+  const isPublicRoute =
+    request.nextUrl.pathname === '/' ||
+    request.nextUrl.pathname === '/cart' ||
+    request.nextUrl.pathname.startsWith('/shop/')
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith('/login') ||
     request.nextUrl.pathname.startsWith('/signup') ||
     request.nextUrl.pathname.startsWith('/auth')
 
   // If user is not logged in and tries to access a protected page, send to /login
-  if (!user && !isHomePage && !isAuthRoute) {
+  if (!user && !isPublicRoute && !isAuthRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    return NextResponse.redirect(url)
+    return redirectWithSession(url, supabaseResponse)
   }
 
-  // If user IS logged in and tries to access /login, send them to /dashboard (matching your sign-in logic)
+  // If user IS logged in and tries to access /login, send them to the
+  // marketplace home. There's no single role-appropriate landing page to
+  // pick here without an extra DB round-trip — '/' works for every role,
+  // and the header links to /sell or /admin from there.
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
+    url.pathname = '/'
+    return redirectWithSession(url, supabaseResponse)
   }
 
   return supabaseResponse
+}
+
+// NextResponse.redirect() creates a brand new response object, so any
+// refreshed Supabase auth cookies that getUser() attached to
+// supabaseResponse (via the setAll callback above) would otherwise be
+// dropped. Losing them makes the browser keep sending a stale/soon-to-expire
+// cookie, which can make the user look logged-out on the very next request -
+// bouncing them between /login and a protected route in a redirect loop. Copying
+// the cookies over keeps the refreshed session intact across the redirect.
+function redirectWithSession(url: URL, supabaseResponse: NextResponse) {
+  const redirectResponse = NextResponse.redirect(url)
+  supabaseResponse.cookies.getAll().forEach((cookie) => {
+    redirectResponse.cookies.set(cookie)
+  })
+  return redirectResponse
 }

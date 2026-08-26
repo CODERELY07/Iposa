@@ -1,0 +1,965 @@
+-- Paste this whole file into the Supabase SQL Editor and run it top to
+-- bottom in one go. Every statement is idempotent (IF NOT EXISTS / OR
+-- REPLACE / DROP ... IF EXISTS), so it's also safe to re-run after future
+-- edits to this file — it upgrades in place rather than erroring out.
+--
+-- One platform, one tenant model: every business owner works entirely under
+-- /sell — POS, product catalog (with optional recipes/cost tracking),
+-- ingredients, sales history, analytics, online orders, and shop settings —
+-- all scoped to their own `business_id`. There is exactly one operator per
+-- business for now (the owner); no per-business staff accounts yet.
+--
+-- The old single-tenant `products` table (and the assumption of one shared
+-- internal POS for one company) is gone. `store_products` is now the one
+-- and only product catalog: the same row is what's sold in-person via POS
+-- AND what's listed on the public marketplace (via `is_active`) — one stock
+-- number, not two that can drift apart.
+
+-- =============================================================================
+-- SECTION 1 — PROFILES & ROLES
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id uuid NOT NULL,
+  full_name text,
+  role text DEFAULT 'customer'::text,
+  created_at timestamp without time zone DEFAULT now(),
+  manager_pin text,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+
+-- 'admin' / 'staff' / 'cashier' are kept in the check constraint only for
+-- backwards compatibility with any pre-existing rows; nothing in the app
+-- assigns them anymore. A business owner is 'business_admin'; the
+-- marketplace operator is 'super_admin'; everyone else is 'customer'.
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('admin', 'staff', 'cashier', 'super_admin', 'business_admin', 'customer'));
+ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'customer';
+
+CREATE OR REPLACE FUNCTION public.current_user_role()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT role FROM public.profiles WHERE id = auth.uid();
+$$;
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+-- =============================================================================
+-- SECTION 2 — BUSINESSES
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.businesses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id uuid NOT NULL UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  description text,
+  logo_url text,
+  banner_url text,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  rejection_reason text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS businesses_status_idx ON public.businesses(status);
+
+DROP TRIGGER IF EXISTS trg_businesses_updated_at ON public.businesses;
+CREATE TRIGGER trg_businesses_updated_at
+  BEFORE UPDATE ON public.businesses
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- Only a super_admin may change `status` (approve/reject), enforced at the
+-- row level even if a business owner's UPDATE policy would otherwise let
+-- them touch their own row (defense in depth alongside the RPC below).
+CREATE OR REPLACE FUNCTION public.protect_business_status()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status AND public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can change a business status';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_business_status ON public.businesses;
+CREATE TRIGGER trg_protect_business_status
+  BEFORE UPDATE ON public.businesses
+  FOR EACH ROW EXECUTE FUNCTION public.protect_business_status();
+
+-- =============================================================================
+-- SECTION 3 — SHARED CATEGORY TAXONOMY
+-- Global, not business-scoped: this is what lets the marketplace filter
+-- "all shops" by one consistent category list. Any approved business owner
+-- can add a new category (needed to categorize their own products); only a
+-- super_admin can rename or delete one, since a shared list is easy for one
+-- shop to break for everyone else.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.categories (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name text NOT NULL UNIQUE,
+  slug text UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- SECTION 4 — THE UNIFIED PRODUCT CATALOG
+-- One row per product per business. `price`/`stock` are what both POS and
+-- the marketplace read. `cost_price` and/or `recipes` (below) are optional —
+-- a product with no recipe rows just uses cost_price directly for margin
+-- reporting; a product with recipe rows derives its cost (and its live
+-- sellable stock) from ingredient consumption instead.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.store_products (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  category_id bigint REFERENCES public.categories(id) ON DELETE SET NULL,
+  name text NOT NULL,
+  slug text NOT NULL,
+  sku text,
+  description text,
+  image_url text,
+  cost_price numeric(10,2) NOT NULL DEFAULT 0 CHECK (cost_price >= 0),
+  price numeric(10,2) NOT NULL CHECK (price >= 0),
+  stock integer NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (business_id, slug)
+);
+-- Additive, in case an earlier version of this script already created the
+-- table without these columns.
+ALTER TABLE public.store_products ADD COLUMN IF NOT EXISTS sku text;
+ALTER TABLE public.store_products ADD COLUMN IF NOT EXISTS cost_price numeric(10,2) NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS store_products_business_id_idx ON public.store_products(business_id);
+CREATE INDEX IF NOT EXISTS store_products_category_id_idx ON public.store_products(category_id);
+CREATE INDEX IF NOT EXISTS store_products_is_active_idx ON public.store_products(is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS store_products_business_sku_idx ON public.store_products(business_id, sku) WHERE sku IS NOT NULL;
+
+DROP TRIGGER IF EXISTS trg_store_products_updated_at ON public.store_products;
+CREATE TRIGGER trg_store_products_updated_at
+  BEFORE UPDATE ON public.store_products
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ---- ingredients (raw stock, one pool per business) ----
+CREATE TABLE IF NOT EXISTS public.ingredients (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  sku text,
+  cost_per_unit numeric NOT NULL DEFAULT 0.0000,
+  unit_type text NOT NULL DEFAULT 'grams'::text,
+  current_stock numeric NOT NULL DEFAULT 0.00,
+  min_stock_alert numeric NOT NULL DEFAULT 10.00,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Additive, in case an earlier run of this script created `ingredients`
+-- before it was business-scoped.
+ALTER TABLE public.ingredients ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
+ALTER TABLE public.ingredients DROP CONSTRAINT IF EXISTS ingredients_sku_key;
+
+CREATE INDEX IF NOT EXISTS ingredients_business_id_idx ON public.ingredients(business_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ingredients_business_sku_idx ON public.ingredients(business_id, sku) WHERE sku IS NOT NULL;
+
+-- ---- recipes (bill of materials: how much of which ingredient a product consumes) ----
+CREATE TABLE IF NOT EXISTS public.recipes (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  product_id bigint NOT NULL REFERENCES public.store_products(id) ON DELETE CASCADE,
+  ingredient_id bigint NOT NULL REFERENCES public.ingredients(id) ON DELETE CASCADE,
+  quantity_used numeric NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Additive: repoint an earlier run's FK (which referenced the now-dropped
+-- `products` table) at `store_products` instead.
+ALTER TABLE public.recipes DROP CONSTRAINT IF EXISTS recipes_product_id_fkey;
+ALTER TABLE public.recipes ADD CONSTRAINT recipes_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.store_products(id) ON DELETE CASCADE;
+ALTER TABLE public.recipes DROP CONSTRAINT IF EXISTS recipes_ingredient_id_fkey;
+ALTER TABLE public.recipes ADD CONSTRAINT recipes_ingredient_id_fkey FOREIGN KEY (ingredient_id) REFERENCES public.ingredients(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS recipes_product_id_idx ON public.recipes(product_id);
+CREATE INDEX IF NOT EXISTS recipes_ingredient_id_idx ON public.recipes(ingredient_id);
+
+-- A recipe can't link a product from one business to an ingredient from
+-- another — both sides of the schema are now multi-tenant, so this is a
+-- real data-integrity risk without the check.
+CREATE OR REPLACE FUNCTION public.validate_recipe_business()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_product_business uuid;
+  v_ingredient_business uuid;
+BEGIN
+  SELECT business_id INTO v_product_business FROM public.store_products WHERE id = NEW.product_id;
+  SELECT business_id INTO v_ingredient_business FROM public.ingredients WHERE id = NEW.ingredient_id;
+  IF v_product_business IS DISTINCT FROM v_ingredient_business THEN
+    RAISE EXCEPTION 'Recipe product and ingredient must belong to the same business';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_recipe_business ON public.recipes;
+CREATE TRIGGER trg_validate_recipe_business
+  BEFORE INSERT OR UPDATE ON public.recipes
+  FOR EACH ROW EXECUTE FUNCTION public.validate_recipe_business();
+
+-- ---- inventory_logs (manual stock adjustments to ingredients) ----
+CREATE TABLE IF NOT EXISTS public.inventory_logs (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  ingredient_id bigint REFERENCES public.ingredients(id) ON DELETE CASCADE,
+  quantity numeric NOT NULL,
+  type text CHECK (type = ANY (ARRAY['in'::text, 'out'::text, 'waste'::text])),
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Additive, in case an earlier run of this script created `inventory_logs`
+-- before it was business-scoped.
+ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS inventory_logs_business_id_idx ON public.inventory_logs(business_id);
+
+-- ---- operating_expenses (fixed monthly bills, for net-profit analytics) ----
+CREATE TABLE IF NOT EXISTS public.operating_expenses (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  amount numeric NOT NULL,
+  billing_period date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Additive, in case an earlier run of this script created
+-- `operating_expenses` before it was business-scoped.
+ALTER TABLE public.operating_expenses ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS operating_expenses_business_id_idx ON public.operating_expenses(business_id);
+
+-- =============================================================================
+-- SECTION 5 — IN-PERSON POS SALES
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.sales (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  total numeric NOT NULL,
+  payment numeric NOT NULL,
+  change numeric NOT NULL,
+  created_by uuid REFERENCES auth.users(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Additive, in case an earlier run of this script created `sales` before it
+-- was business-scoped.
+ALTER TABLE public.sales ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS sales_business_id_idx ON public.sales(business_id);
+
+CREATE TABLE IF NOT EXISTS public.sale_items (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  sale_id bigint NOT NULL REFERENCES public.sales(id) ON DELETE CASCADE,
+  product_id bigint REFERENCES public.store_products(id) ON DELETE SET NULL,
+  quantity integer NOT NULL,
+  selling_price numeric NOT NULL,
+  computed_cogs numeric NOT NULL
+);
+-- Additive: repoint an earlier run's FKs — `product_id` referenced the
+-- now-dropped `products` table, and `sale_id` had no ON DELETE behavior
+-- (voiding a sale relied on cascade + the stock-restore trigger below).
+ALTER TABLE public.sale_items DROP CONSTRAINT IF EXISTS sale_items_product_id_fkey;
+ALTER TABLE public.sale_items ADD CONSTRAINT sale_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.store_products(id) ON DELETE SET NULL;
+ALTER TABLE public.sale_items DROP CONSTRAINT IF EXISTS sale_items_sale_id_fkey;
+ALTER TABLE public.sale_items ADD CONSTRAINT sale_items_sale_id_fkey FOREIGN KEY (sale_id) REFERENCES public.sales(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS sale_items_sale_id_idx ON public.sale_items(sale_id);
+
+-- Voiding a sale (deleting its row) cascades to its sale_items; restore the
+-- stock/ingredients that sale consumed as each item row disappears.
+CREATE OR REPLACE FUNCTION public.restore_stock_on_sale_item_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF OLD.product_id IS NULL THEN
+    RETURN OLD;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.recipes WHERE product_id = OLD.product_id) THEN
+    UPDATE public.ingredients i
+    SET current_stock = i.current_stock + (r.quantity_used * OLD.quantity)
+    FROM public.recipes r
+    WHERE r.ingredient_id = i.id AND r.product_id = OLD.product_id;
+  ELSE
+    UPDATE public.store_products
+    SET stock = stock + OLD.quantity
+    WHERE id = OLD.product_id;
+  END IF;
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_restore_stock_on_sale_item_delete ON public.sale_items;
+CREATE TRIGGER trg_restore_stock_on_sale_item_delete
+  AFTER DELETE ON public.sale_items
+  FOR EACH ROW EXECUTE FUNCTION public.restore_stock_on_sale_item_delete();
+
+-- =============================================================================
+-- SECTION 6 — ONLINE MARKETPLACE ORDERS
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.store_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  customer_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled')),
+  subtotal numeric(10,2) NOT NULL DEFAULT 0,
+  total numeric(10,2) NOT NULL DEFAULT 0,
+  shipping_name text,
+  shipping_phone text,
+  shipping_address text,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS store_orders_business_id_idx ON public.store_orders(business_id);
+CREATE INDEX IF NOT EXISTS store_orders_customer_id_idx ON public.store_orders(customer_id);
+
+DROP TRIGGER IF EXISTS trg_store_orders_updated_at ON public.store_orders;
+CREATE TRIGGER trg_store_orders_updated_at
+  BEFORE UPDATE ON public.store_orders
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TABLE IF NOT EXISTS public.store_order_items (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  order_id uuid NOT NULL REFERENCES public.store_orders(id) ON DELETE CASCADE,
+  product_id bigint REFERENCES public.store_products(id) ON DELETE SET NULL,
+  product_name text NOT NULL,
+  quantity integer NOT NULL CHECK (quantity > 0),
+  unit_price numeric(10,2) NOT NULL CHECK (unit_price >= 0),
+  subtotal numeric(10,2) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS store_order_items_order_id_idx ON public.store_order_items(order_id);
+
+-- ---- public read view for the marketplace feed ----
+CREATE OR REPLACE VIEW public.marketplace_products
+WITH (security_invoker = true) AS
+SELECT
+  sp.id,
+  sp.name,
+  sp.slug,
+  sp.description,
+  sp.image_url,
+  sp.price,
+  sp.stock,
+  sp.category_id,
+  c.name AS category_name,
+  c.slug AS category_slug,
+  sp.business_id,
+  b.name AS business_name,
+  b.slug AS business_slug,
+  b.logo_url AS business_logo_url,
+  sp.created_at
+FROM public.store_products sp
+JOIN public.businesses b ON b.id = sp.business_id AND b.status = 'approved'
+LEFT JOIN public.categories c ON c.id = sp.category_id
+WHERE sp.is_active = true;
+
+GRANT SELECT ON public.marketplace_products TO anon, authenticated;
+
+-- =============================================================================
+-- SECTION 7 — RPCs (all privilege-sensitive writes go through these)
+-- =============================================================================
+
+-- A logged-in customer registers a storefront. Flips their own role to
+-- business_admin and creates a `pending` business in one atomic step.
+CREATE OR REPLACE FUNCTION public.register_business(p_name text, p_slug text, p_description text DEFAULT NULL)
+RETURNS public.businesses
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_role text;
+  v_business public.businesses;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT role INTO v_role FROM public.profiles WHERE id = v_uid;
+
+  IF v_role IS NULL THEN
+    RAISE EXCEPTION 'Profile not found';
+  END IF;
+
+  IF v_role = 'super_admin' THEN
+    RAISE EXCEPTION 'Super admins cannot register a storefront';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.businesses WHERE owner_id = v_uid) THEN
+    RAISE EXCEPTION 'You already have a registered business';
+  END IF;
+
+  IF p_name IS NULL OR length(trim(p_name)) = 0 THEN
+    RAISE EXCEPTION 'Business name is required';
+  END IF;
+
+  UPDATE public.profiles SET role = 'business_admin' WHERE id = v_uid;
+
+  INSERT INTO public.businesses (owner_id, name, slug, description, status)
+  VALUES (v_uid, trim(p_name), p_slug, p_description, 'pending')
+  RETURNING * INTO v_business;
+
+  RETURN v_business;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.register_business(text, text, text) TO authenticated;
+
+-- A super_admin approves or rejects a pending business.
+CREATE OR REPLACE FUNCTION public.set_business_status(p_business_id uuid, p_status text, p_rejection_reason text DEFAULT NULL)
+RETURNS public.businesses
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_business public.businesses;
+BEGIN
+  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can review business applications';
+  END IF;
+
+  IF p_status NOT IN ('approved', 'rejected') THEN
+    RAISE EXCEPTION 'Invalid status: %', p_status;
+  END IF;
+
+  UPDATE public.businesses
+  SET status = p_status,
+      rejection_reason = CASE WHEN p_status = 'rejected' THEN p_rejection_reason ELSE NULL END
+  WHERE id = p_business_id
+  RETURNING * INTO v_business;
+
+  IF v_business IS NULL THEN
+    RAISE EXCEPTION 'Business not found';
+  END IF;
+
+  RETURN v_business;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.set_business_status(uuid, text, text) TO authenticated;
+
+-- A customer checks out on the marketplace. Splits the cart by business
+-- (one order per shop), validates stock/availability, and decrements stock
+-- — all in one transaction so a half-placed multi-vendor order can't happen.
+CREATE OR REPLACE FUNCTION public.place_order(
+  p_items jsonb,
+  p_shipping_name text,
+  p_shipping_phone text,
+  p_shipping_address text,
+  p_notes text DEFAULT NULL
+)
+RETURNS SETOF public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_business_id uuid;
+  v_order_id uuid;
+  v_subtotal numeric(10,2);
+  v_order_ids uuid[] := '{}';
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Cart is empty';
+  END IF;
+
+  CREATE TEMPORARY TABLE _cart_items (
+    product_id bigint,
+    quantity integer
+  ) ON COMMIT DROP;
+
+  INSERT INTO _cart_items (product_id, quantity)
+  SELECT (elem->>'product_id')::bigint, (elem->>'quantity')::integer
+  FROM jsonb_array_elements(p_items) AS elem;
+
+  IF EXISTS (SELECT 1 FROM _cart_items WHERE quantity <= 0 OR product_id IS NULL) THEN
+    RAISE EXCEPTION 'Invalid quantity in cart';
+  END IF;
+
+  -- Lock the rows we're about to sell against concurrent checkouts.
+  PERFORM 1 FROM public.store_products p
+    JOIN _cart_items c ON c.product_id = p.id
+    FOR UPDATE OF p;
+
+  PERFORM 1 FROM public.ingredients i
+    JOIN public.recipes r ON r.ingredient_id = i.id
+    JOIN _cart_items c ON c.product_id = r.product_id
+    FOR UPDATE OF i;
+
+  -- Standalone products are checked against their own stock. Recipe-based
+  -- products are skipped here — their `stock` column is always kept at 0 by
+  -- convention, so checking it directly would reject every recipe-based order.
+  IF EXISTS (
+    SELECT 1
+    FROM _cart_items c
+    LEFT JOIN public.store_products p ON p.id = c.product_id
+    LEFT JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id IS NULL
+       OR p.is_active = false
+       OR b.status <> 'approved'
+       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  -- Recipe-based products are checked against ingredient supply instead,
+  -- aggregated per ingredient (see process_sale() for why this can't be
+  -- checked per-product independently).
+  IF EXISTS (
+    SELECT r.ingredient_id
+    FROM _cart_items c
+    JOIN public.recipes r ON r.product_id = c.product_id
+    JOIN public.ingredients i ON i.id = r.ingredient_id
+    GROUP BY r.ingredient_id, i.current_stock
+    HAVING SUM(r.quantity_used * c.quantity) > i.current_stock
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  FOR v_business_id IN
+    SELECT DISTINCT p.business_id
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+  LOOP
+    SELECT COALESCE(SUM(c.quantity * p.price), 0)
+      INTO v_subtotal
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id
+      WHERE p.business_id = v_business_id;
+
+    INSERT INTO public.store_orders (business_id, customer_id, status, subtotal, total, shipping_name, shipping_phone, shipping_address, notes)
+    VALUES (v_business_id, v_uid, 'pending', v_subtotal, v_subtotal, p_shipping_name, p_shipping_phone, p_shipping_address, p_notes)
+    RETURNING id INTO v_order_id;
+
+    INSERT INTO public.store_order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+    SELECT v_order_id, p.id, p.name, c.quantity, p.price, c.quantity * p.price
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+    WHERE p.business_id = v_business_id;
+
+    UPDATE public.store_products p
+    SET stock = p.stock - c.quantity
+    FROM _cart_items c
+    WHERE p.id = c.product_id
+      AND p.business_id = v_business_id
+      AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
+
+    UPDATE public.ingredients i
+    SET current_stock = i.current_stock - agg.total_used
+    FROM (
+      SELECT r.ingredient_id, SUM(r.quantity_used * c.quantity) AS total_used
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id AND p.business_id = v_business_id
+      JOIN public.recipes r ON r.product_id = c.product_id
+      GROUP BY r.ingredient_id
+    ) agg
+    WHERE i.id = agg.ingredient_id;
+
+    v_order_ids := array_append(v_order_ids, v_order_id);
+  END LOOP;
+
+  RETURN QUERY SELECT * FROM public.store_orders WHERE id = ANY(v_order_ids);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_order(jsonb, text, text, text, text) TO authenticated;
+
+-- A business owner rings up an in-person POS sale for their own business.
+-- Business is derived from the caller (owner-only model — no per-business
+-- staff accounts yet), never trusted from the client. Recipe-based products
+-- decrement their ingredients; standalone products decrement their own
+-- stock directly.
+CREATE OR REPLACE FUNCTION public.process_sale(p_total numeric, p_payment numeric, p_change numeric, p_items jsonb)
+RETURNS bigint
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_business_id uuid;
+  v_sale_id bigint;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT id INTO v_business_id FROM public.businesses WHERE owner_id = v_uid AND status = 'approved';
+  IF v_business_id IS NULL THEN
+    RAISE EXCEPTION 'No approved business found for this account';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Cart is empty';
+  END IF;
+
+  CREATE TEMPORARY TABLE _sale_items (
+    product_id bigint,
+    quantity integer,
+    price numeric(10,2),
+    subtotal numeric(10,2)
+  ) ON COMMIT DROP;
+
+  INSERT INTO _sale_items (product_id, quantity, price, subtotal)
+  SELECT
+    (elem->>'product_id')::bigint,
+    (elem->>'quantity')::integer,
+    (elem->>'price')::numeric,
+    (elem->>'subtotal')::numeric
+  FROM jsonb_array_elements(p_items) AS elem;
+
+  IF EXISTS (SELECT 1 FROM _sale_items WHERE quantity <= 0 OR product_id IS NULL) THEN
+    RAISE EXCEPTION 'Invalid quantity in cart';
+  END IF;
+
+  PERFORM 1 FROM public.store_products p
+    JOIN _sale_items c ON c.product_id = p.id
+    WHERE p.business_id = v_business_id
+    FOR UPDATE OF p;
+
+  PERFORM 1 FROM public.ingredients i
+    JOIN public.recipes r ON r.ingredient_id = i.id
+    JOIN _sale_items c ON c.product_id = r.product_id
+    FOR UPDATE OF i;
+
+  -- Standalone products are checked against their own stock. Recipe-based
+  -- products are skipped here — their `stock` column is always kept at 0
+  -- by convention (the client hardcodes it when a recipe is attached), so
+  -- checking it directly would reject every recipe-based sale.
+  IF EXISTS (
+    SELECT 1 FROM _sale_items c
+    LEFT JOIN public.store_products p ON p.id = c.product_id AND p.business_id = v_business_id
+    WHERE p.id IS NULL
+       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+  ) THEN
+    RAISE EXCEPTION 'One or more items are unavailable in the requested quantity';
+  END IF;
+
+  -- Recipe-based products are checked against ingredient supply instead,
+  -- aggregated per ingredient — two different products in the same sale
+  -- that both consume the same ingredient must be checked against their
+  -- combined total, not independently.
+  IF EXISTS (
+    SELECT r.ingredient_id
+    FROM _sale_items c
+    JOIN public.recipes r ON r.product_id = c.product_id
+    JOIN public.ingredients i ON i.id = r.ingredient_id
+    GROUP BY r.ingredient_id, i.current_stock
+    HAVING SUM(r.quantity_used * c.quantity) > i.current_stock
+  ) THEN
+    RAISE EXCEPTION 'Not enough ingredient stock for one or more recipe-based items';
+  END IF;
+
+  INSERT INTO public.sales (business_id, total, payment, change, created_by)
+  VALUES (v_business_id, p_total, p_payment, p_change, v_uid)
+  RETURNING id INTO v_sale_id;
+
+  INSERT INTO public.sale_items (sale_id, product_id, quantity, selling_price, computed_cogs)
+  SELECT
+    v_sale_id,
+    c.product_id,
+    c.quantity,
+    c.price,
+    COALESCE(
+      (SELECT SUM(r.quantity_used * i.cost_per_unit)
+         FROM public.recipes r JOIN public.ingredients i ON i.id = r.ingredient_id
+         WHERE r.product_id = c.product_id),
+      (SELECT cost_price FROM public.store_products WHERE id = c.product_id)
+    ) * c.quantity
+  FROM _sale_items c;
+
+  -- Standalone products decrement their own stock directly...
+  UPDATE public.store_products p
+  SET stock = p.stock - c.quantity
+  FROM _sale_items c
+  WHERE p.id = c.product_id
+    AND p.business_id = v_business_id
+    AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
+
+  -- ...recipe-based products decrement the combined ingredient totals they
+  -- consumed. Pre-aggregated by ingredient first: a plain UPDATE ... FROM
+  -- with multiple matching source rows (e.g. two cart items sharing an
+  -- ingredient) only applies one arbitrary match per target row, not the
+  -- sum of all of them.
+  UPDATE public.ingredients i
+  SET current_stock = i.current_stock - agg.total_used
+  FROM (
+    SELECT r.ingredient_id, SUM(r.quantity_used * c.quantity) AS total_used
+    FROM _sale_items c
+    JOIN public.recipes r ON r.product_id = c.product_id
+    GROUP BY r.ingredient_id
+  ) agg
+  WHERE i.id = agg.ingredient_id;
+
+  RETURN v_sale_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.process_sale(numeric, numeric, numeric, jsonb) TO authenticated;
+
+-- Lets a user set their own POS void-confirmation PIN. Deliberately narrow
+-- (touches only manager_pin) instead of a general "update own profile" RLS
+-- policy, which would have no way to stop a user also rewriting their own
+-- `role` column to something like 'super_admin'.
+CREATE OR REPLACE FUNCTION public.update_manager_pin(p_pin text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_pin !~ '^[0-9]{4}$' THEN
+    RAISE EXCEPTION 'PIN must be exactly 4 digits';
+  END IF;
+
+  UPDATE public.profiles SET manager_pin = p_pin WHERE id = v_uid;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_manager_pin(text) TO authenticated;
+
+-- New auth.users get a profiles row automatically, defaulting to 'customer'.
+-- Safe to keep even if your Supabase project already has an equivalent
+-- trigger — ON CONFLICT DO NOTHING makes this a no-op in that case.
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, role)
+  VALUES (NEW.id, NEW.raw_user_meta_data->>'full_name', 'customer')
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- =============================================================================
+-- SECTION 8 — ROW LEVEL SECURITY
+-- =============================================================================
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "profiles_select_own" ON public.profiles;
+CREATE POLICY "profiles_select_own" ON public.profiles FOR SELECT
+  USING (id = auth.uid() OR public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "categories_select_all" ON public.categories;
+CREATE POLICY "categories_select_all" ON public.categories FOR SELECT USING (true);
+DROP POLICY IF EXISTS "categories_write_super_admin" ON public.categories;
+CREATE POLICY "categories_write_super_admin" ON public.categories FOR ALL
+  USING (public.current_user_role() = 'super_admin')
+  WITH CHECK (public.current_user_role() = 'super_admin');
+DROP POLICY IF EXISTS "categories_insert_business_admin" ON public.categories;
+CREATE POLICY "categories_insert_business_admin" ON public.categories FOR INSERT
+  WITH CHECK (public.current_user_role() = 'business_admin');
+
+ALTER TABLE public.businesses ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "businesses_select_public_or_own" ON public.businesses;
+CREATE POLICY "businesses_select_public_or_own" ON public.businesses FOR SELECT
+  USING (
+    status = 'approved'
+    OR owner_id = auth.uid()
+    OR public.current_user_role() = 'super_admin'
+  );
+
+DROP POLICY IF EXISTS "businesses_update_own_or_super_admin" ON public.businesses;
+CREATE POLICY "businesses_update_own_or_super_admin" ON public.businesses FOR UPDATE
+  USING (owner_id = auth.uid() OR public.current_user_role() = 'super_admin')
+  WITH CHECK (owner_id = auth.uid() OR public.current_user_role() = 'super_admin');
+-- Row creation/status transitions happen only via register_business() /
+-- set_business_status() (SECURITY DEFINER), so there is no direct INSERT policy.
+
+-- ---- store_products: publicly visible when active + approved, always visible/writable by its owner ----
+ALTER TABLE public.store_products ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "store_products_select_public_or_own" ON public.store_products;
+CREATE POLICY "store_products_select_public_or_own" ON public.store_products FOR SELECT
+  USING (
+    (is_active = true AND EXISTS (
+      SELECT 1 FROM public.businesses b WHERE b.id = store_products.business_id AND b.status = 'approved'
+    ))
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_products.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+
+DROP POLICY IF EXISTS "store_products_write_owner" ON public.store_products;
+CREATE POLICY "store_products_write_owner" ON public.store_products FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM public.businesses b
+    WHERE b.id = store_products.business_id AND b.owner_id = auth.uid() AND b.status = 'approved'
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.businesses b
+    WHERE b.id = store_products.business_id AND b.owner_id = auth.uid() AND b.status = 'approved'
+  ));
+
+-- ---- everything below is private, owner-only back-office data (no public branch) ----
+
+ALTER TABLE public.ingredients ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "ingredients_owner_all" ON public.ingredients;
+CREATE POLICY "ingredients_owner_all" ON public.ingredients FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = ingredients.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin')
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = ingredients.business_id AND b.owner_id = auth.uid() AND b.status = 'approved')
+    OR public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.recipes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "recipes_owner_all" ON public.recipes;
+CREATE POLICY "recipes_owner_all" ON public.recipes FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM public.store_products p JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id = recipes.product_id AND (b.owner_id = auth.uid() OR public.current_user_role() = 'super_admin')
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.store_products p JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id = recipes.product_id AND ((b.owner_id = auth.uid() AND b.status = 'approved') OR public.current_user_role() = 'super_admin')
+  ));
+
+ALTER TABLE public.inventory_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "inventory_logs_owner_all" ON public.inventory_logs;
+CREATE POLICY "inventory_logs_owner_all" ON public.inventory_logs FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = inventory_logs.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin')
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = inventory_logs.business_id AND b.owner_id = auth.uid() AND b.status = 'approved')
+    OR public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.operating_expenses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "operating_expenses_owner_all" ON public.operating_expenses;
+CREATE POLICY "operating_expenses_owner_all" ON public.operating_expenses FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = operating_expenses.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin')
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = operating_expenses.business_id AND b.owner_id = auth.uid() AND b.status = 'approved')
+    OR public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.sales ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sales_owner_all" ON public.sales;
+CREATE POLICY "sales_owner_all" ON public.sales FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = sales.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin')
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = sales.business_id AND b.owner_id = auth.uid() AND b.status = 'approved')
+    OR public.current_user_role() = 'super_admin');
+-- In practice sales/sale_items are written only via process_sale() (SECURITY
+-- DEFINER); this policy mainly governs SELECT (sales history) and DELETE
+-- (voiding a transaction), which the app does perform directly.
+
+ALTER TABLE public.sale_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "sale_items_owner_all" ON public.sale_items;
+CREATE POLICY "sale_items_owner_all" ON public.sale_items FOR ALL
+  USING (EXISTS (
+    SELECT 1 FROM public.sales s JOIN public.businesses b ON b.id = s.business_id
+    WHERE s.id = sale_items.sale_id AND (b.owner_id = auth.uid() OR public.current_user_role() = 'super_admin')
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM public.sales s JOIN public.businesses b ON b.id = s.business_id
+    WHERE s.id = sale_items.sale_id AND ((b.owner_id = auth.uid() AND b.status = 'approved') OR public.current_user_role() = 'super_admin')
+  ));
+
+-- ---- online marketplace orders ----
+ALTER TABLE public.store_orders ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "store_orders_select_participant" ON public.store_orders;
+CREATE POLICY "store_orders_select_participant" ON public.store_orders FOR SELECT
+  USING (
+    customer_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+
+DROP POLICY IF EXISTS "store_orders_update_business_owner" ON public.store_orders;
+CREATE POLICY "store_orders_update_business_owner" ON public.store_orders FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid()));
+-- No direct INSERT policy: orders are only created via place_order() (SECURITY DEFINER),
+-- which keeps stock decrements and multi-vendor order splitting atomic.
+
+ALTER TABLE public.store_order_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "store_order_items_select_participant" ON public.store_order_items;
+CREATE POLICY "store_order_items_select_participant" ON public.store_order_items FOR SELECT
+  USING (EXISTS (
+    SELECT 1 FROM public.store_orders o
+    WHERE o.id = store_order_items.order_id
+      AND (
+        o.customer_id = auth.uid()
+        OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = o.business_id AND b.owner_id = auth.uid())
+        OR public.current_user_role() = 'super_admin'
+      )
+  ));
+
+-- =============================================================================
+-- SECTION 9 — MIGRATING FROM THE OLDER (SINGLE-TENANT) VERSION OF THIS SCHEMA
+-- Only relevant if you previously ran a version of this file that created a
+-- standalone `products` table. There's no production data to preserve
+-- (a clean-rebuild call made earlier in this project), so it's just dropped;
+-- `store_products` is the only product table now.
+--
+-- The `ALTER TABLE ... ADD COLUMN IF NOT EXISTS business_id` statements
+-- above (ingredients, inventory_logs, operating_expenses, sales) are
+-- nullable on purpose, so they don't fail against a table that already has
+-- rows. If you're upgrading a database that already has rows in those
+-- tables, backfill business_id on each of them, then run:
+--   ALTER TABLE public.ingredients ALTER COLUMN business_id SET NOT NULL;
+--   ALTER TABLE public.inventory_logs ALTER COLUMN business_id SET NOT NULL;
+--   ALTER TABLE public.operating_expenses ALTER COLUMN business_id SET NOT NULL;
+--   ALTER TABLE public.sales ALTER COLUMN business_id SET NOT NULL;
+-- On a fresh database (the expected case here) every one of these tables is
+-- created empty with business_id NOT NULL already, and this whole section
+-- is a no-op.
+-- =============================================================================
+
+DROP TABLE IF EXISTS public.products CASCADE;

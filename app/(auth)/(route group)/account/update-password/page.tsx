@@ -36,7 +36,7 @@ export default function UpdatePasswordPage() {
       return
     }
 
-    router.push('/sign-in?message=password-updated')
+    router.push('/login?message=password-updated')
     router.refresh()
   }
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 export default function SignUpPage() {
@@ -31,7 +32,7 @@ export default function SignUpPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${location.origin}/home` },
+      options: { emailRedirectTo: `${location.origin}/` },
     })
 
     if (error) {
@@ -61,7 +62,7 @@ export default function SignUpPage() {
         </div>
         <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center gap-1 text-sm text-zinc-500">
           <span>Already confirmed?</span>
-          <a href="/sign-in" className="text-emerald-700 font-medium hover:underline">Sign in</a>
+          <Link href="/login" className="text-emerald-700 font-medium hover:underline">Sign in</Link>
         </div>
       </div>
     )
@@ -137,7 +138,7 @@ export default function SignUpPage() {
 
       <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center gap-1 text-sm text-zinc-500">
         <span>Already have an account?</span>
-        <a href="/sign-in" className="text-emerald-700 font-medium hover:underline">Sign in</a>
+        <Link href="/login" className="text-emerald-700 font-medium hover:underline">Sign in</Link>
       </div>
     </div>
   )
