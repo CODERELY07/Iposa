@@ -14,9 +14,14 @@ function slugify(input: string) {
 export async function registerBusinessAction(formData: FormData) {
   const name = String(formData.get('name') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim() || null
+  const businessType = String(formData.get('business_type') ?? '').trim()
 
   if (!name) {
     return { success: false as const, message: 'Business name is required.' }
+  }
+
+  if (!['restaurant', 'services', 'retail'].includes(businessType)) {
+    return { success: false as const, message: 'Choose a business type to continue.' }
   }
 
   const supabase = await createClient()
@@ -24,6 +29,7 @@ export async function registerBusinessAction(formData: FormData) {
     p_name: name,
     p_slug: `${slugify(name)}-${Math.random().toString(36).slice(2, 7)}`,
     p_description: description,
+    p_business_type: businessType,
   })
 
   if (error) {

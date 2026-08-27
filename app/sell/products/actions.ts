@@ -2,6 +2,7 @@
 
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import type { RecipeItem } from '@/lib/types/marketplace'
 
 function slugify(input: string) {
@@ -29,6 +30,12 @@ export async function saveProductAction(payload: ProductPayload, recipeItems: Re
   const business = await requireApprovedBusiness()
   const supabase = await createClient()
 
+  // Whether this row tracks a finite stock count at all is derived from the
+  // business's own type, never trusted from the client — a service (see
+  // lib/business/type-meta.ts) is always available regardless of `stock`,
+  // which is meaningless for it and just stored as 0.
+  const tracksStock = getBusinessTypeMeta(business.business_type).tracksStock
+
   const itemPayload = {
     name: payload.name,
     category_id: payload.category_id,
@@ -37,7 +44,8 @@ export async function saveProductAction(payload: ProductPayload, recipeItems: Re
     image_url: payload.image_url,
     cost_price: payload.cost_price,
     price: payload.price,
-    stock: payload.stock,
+    stock: tracksStock ? payload.stock : 0,
+    track_stock: tracksStock,
     is_active: payload.is_active,
   }
 

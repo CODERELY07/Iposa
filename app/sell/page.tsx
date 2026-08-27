@@ -79,11 +79,13 @@ export default async function SellDashboardPage() {
     // In-person POS sales recorded today
     supabase.from('sales').select('total').eq('business_id', business.id).gte('created_at', todayISO),
     // Products running low (under 10 units), standalone stock only — recipe-based
-    // products derive live stock from ingredients instead (see Products/Analytics).
+    // products derive live stock from ingredients instead (see Products/Analytics),
+    // and untracked rows (services — always available) never count as "low stock".
     supabase
       .from('store_products')
       .select('id, name, sku, stock')
       .eq('business_id', business.id)
+      .eq('track_stock', true)
       .lt('stock', 10)
       .order('stock', { ascending: true })
       .limit(5),

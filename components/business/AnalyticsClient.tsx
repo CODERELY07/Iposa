@@ -17,6 +17,8 @@ import { Line, Doughnut } from 'react-chartjs-2'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { CheckCircle2 } from 'lucide-react'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import type { BusinessType } from '@/lib/types/marketplace'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler)
 
@@ -24,6 +26,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 const CHART_COLORS = ['#6d4aff', '#f59e0b', '#0d9488', '#ec4899', '#0ea5e9']
 
 type Props = {
+  businessType: BusinessType
   salesRaw: { total: number; created_at: string }[]
   topProducts: { name: string; qty: number; revenue: number; profit: number }[]
   categoryShares: { name: string; value: number }[]
@@ -41,7 +44,8 @@ type Props = {
   }
 }
 
-export default function AnalyticsClient({ salesRaw, topProducts, categoryShares, lowStockIngredients, ingredientsCostList, kpis }: Props) {
+export default function AnalyticsClient({ businessType, salesRaw, topProducts, categoryShares, lowStockIngredients, ingredientsCostList, kpis }: Props) {
+  const meta = getBusinessTypeMeta(businessType)
 
   // Computes the past 7 days of sales for trend monitoring
   const revenueChartData = useMemo(() => {
@@ -168,7 +172,7 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-2">
+        <Card className={`p-5 ${meta.showMaterialsNav ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
           <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Product Volume &amp; Margins</h3>
           <Table>
             <TableHeader>
@@ -196,13 +200,17 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
           </Table>
         </Card>
 
+        {/* A retail or services business has no bill-of-materials layer at
+            all (see lib/business/type-meta.ts), so there's nothing
+            meaningful to show here — these two panels are restaurant-only. */}
+        {meta.showMaterialsNav && (
         <div className="space-y-6">
           <Card className="p-5">
-            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-red-600 dark:text-red-400">Low Stock Ingredients ({lowStockIngredients.length})</h3>
+            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-red-600 dark:text-red-400">Low Stock {meta.materialLabel} ({lowStockIngredients.length})</h3>
             <div className="max-h-44 space-y-2 overflow-y-auto">
               {lowStockIngredients.length === 0 ? (
                 <div className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-center text-xs font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
-                  <CheckCircle2 className="size-3.5" /> All raw ingredients safely buffered above trigger marks.
+                  <CheckCircle2 className="size-3.5" /> All raw {meta.materialLabel.toLowerCase()} safely buffered above trigger marks.
                 </div>
               ) : (
                 lowStockIngredients.map((ing, idx) => (
@@ -218,7 +226,7 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
           </Card>
 
           <Card className="p-5">
-            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-sky-600 dark:text-sky-400">Ingredient Cost Matrix</h3>
+            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-sky-600 dark:text-sky-400">{meta.materialLabel} Cost Matrix</h3>
             <div className="max-h-44 space-y-1.5 overflow-y-auto text-xs font-medium">
               {ingredientsCostList.map((ing, idx) => (
                 <div key={idx} className="flex justify-between rounded p-2 transition-colors hover:bg-muted/50">
@@ -229,6 +237,7 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
             </div>
           </Card>
         </div>
+        )}
       </div>
     </div>
   )

@@ -16,7 +16,9 @@ export default function ProductPageActions({ product, refCode }: { product: Mark
   const { addItem } = useCart()
   const router = useRouter()
   const [added, setAdded] = useState(false)
-  const outOfStock = product.stock <= 0
+  // A service (see lib/business/type-meta.ts) never carries a finite stock
+  // count — it's always available regardless of `stock`.
+  const outOfStock = product.track_stock && product.stock <= 0
 
   function buildItem() {
     return {

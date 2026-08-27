@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ApplicationStatusBadge } from '@/components/marketplace/StatusBadge'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import { Store } from 'lucide-react'
 
 export default function BusinessReviewClient({ businesses }: { businesses: Business[] }) {
@@ -51,9 +52,12 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
         <Card key={b.id} className="p-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-bold text-foreground">{b.name}</h3>
                 <ApplicationStatusBadge status={b.status} />
+                <span className="label-mono rounded-full bg-gradient-brand-soft px-2 py-0.5 text-primary">
+                  {getBusinessTypeMeta(b.business_type).shortLabel}
+                </span>
               </div>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">/{b.slug}</p>
               {b.description && <p className="mt-2 max-w-xl text-sm text-foreground">{b.description}</p>}

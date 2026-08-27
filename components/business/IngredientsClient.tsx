@@ -11,14 +11,21 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Soup } from 'lucide-react'
+import type { BusinessTypeMeta } from '@/lib/business/type-meta'
 
 type Props = {
   businessId: string
   initialIngredients: Ingredient[]
+  materialMeta: BusinessTypeMeta
   onIngredientsChanged?: () => void // Optional callback to trigger a parent page refresh
 }
 
-export default function IngredientsClient({ businessId, initialIngredients, onIngredientsChanged }: Props) {
+function cap(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+export default function IngredientsClient({ businessId, initialIngredients, materialMeta, onIngredientsChanged }: Props) {
+  const singular = cap(materialMeta.materialLabelSingular)
   const supabase = createClient()
   const [ingredients, setIngredients] = useState<Ingredient[]>(initialIngredients)
 
@@ -94,7 +101,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
   }
 
   async function handleDelete(id: number, name: string) {
-    const confirmed = window.confirm(`Are you sure you want to permanently delete "${name}"? This will cause recipe calculation discrepancies if it's attached to products.`)
+    const confirmed = window.confirm(`Are you sure you want to permanently delete "${name}"? This will cause ${materialMeta.recipeLabel.toLowerCase()} calculation discrepancies if it's attached to products.`)
     if (!confirmed) return
 
     setLoading(true)
@@ -120,7 +127,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
     <Card className="grid grid-cols-1 divide-y overflow-hidden py-0 md:grid-cols-3 md:divide-x md:divide-y-0">
       <div className="bg-muted/30 p-5">
         <h3 className="mb-1 text-sm font-semibold text-foreground">
-          {editingId ? 'Modify Ingredient' : 'Register New Ingredient'}
+          {editingId ? `Modify ${singular}` : `Register New ${singular}`}
         </h3>
         <p className="mb-4 text-xs text-muted-foreground">
           Maintain precise baselines to generate accurate COGS parameters.
@@ -128,7 +135,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
 
         <form onSubmit={handleSave} className="space-y-3">
           <div className="space-y-1">
-            <Label htmlFor="ing-name" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Ingredient Name</Label>
+            <Label htmlFor="ing-name" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">{singular} Name</Label>
             <Input
               id="ing-name"
               required
@@ -187,7 +194,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
 
           <div className="flex gap-2 pt-2">
             <Button type="submit" disabled={loading} className="flex-1">
-              {editingId ? 'Update Record' : 'Save Ingredient'}
+              {editingId ? 'Update Record' : `Save ${singular}`}
             </Button>
             {editingId && (
               <Button type="button" variant="outline" onClick={resetForm}>Cancel</Button>
@@ -215,7 +222,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
               <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
                 <Soup className="size-5 text-primary" />
               </span>
-              No ingredients on file. Use the entry matrix to build your baseline ledger.
+              No {materialMeta.materialLabel.toLowerCase()} on file. Use the entry matrix to build your baseline ledger.
             </div>
           ) : (
             ingredients.map(ing => {

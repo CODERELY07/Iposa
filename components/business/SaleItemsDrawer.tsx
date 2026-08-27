@@ -13,6 +13,9 @@ type SaleItemJoined = {
   quantity: number
   selling_price: number
   store_products: { name: string } | null
+  // Set only for an ad-hoc custom line rung up with no catalog entry — see
+  // process_sale() in database_schema.sql.
+  custom_name: string | null
 }
 
 type DrawerProps = {
@@ -30,7 +33,7 @@ export default function SaleItemsDrawer({ sale, onClose }: DrawerProps) {
       const supabase = createClient()
       const { data } = await supabase
         .from('sale_items')
-        .select('id, quantity, selling_price, store_products(name)')
+        .select('id, quantity, selling_price, store_products(name), custom_name')
         .eq('sale_id', sale.id)
 
       setItems((data as unknown as SaleItemJoined[]) ?? [])
@@ -60,7 +63,12 @@ export default function SaleItemsDrawer({ sale, onClose }: DrawerProps) {
                 {items.map((item) => (
                   <div key={item.id} className="flex justify-between py-2.5 text-xs font-medium">
                     <div>
-                      <h4 className="font-bold text-foreground">{item.store_products?.name ?? 'Deleted product'}</h4>
+                      <h4 className="flex items-center gap-1.5 font-bold text-foreground">
+                        {item.store_products?.name ?? item.custom_name ?? 'Deleted product'}
+                        {!item.store_products && item.custom_name && (
+                          <span className="rounded-full border border-primary/30 px-1.5 py-0.5 text-[9px] font-medium text-primary">Custom</span>
+                        )}
+                      </h4>
                       <p className="mt-0.5 text-[10px] text-muted-foreground">{item.quantity} units &times; ₱{Number(item.selling_price).toFixed(2)}</p>
                     </div>
                     <span className="font-mono text-foreground">₱{(item.quantity * item.selling_price).toFixed(2)}</span>

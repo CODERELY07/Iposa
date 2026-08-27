@@ -52,7 +52,9 @@ export default async function ProductDetailPage({
     }
   }
 
-  const outOfStock = product.stock <= 0
+  // A service (see lib/business/type-meta.ts) never carries a finite stock
+  // count — it's always available regardless of `stock`.
+  const outOfStock = product.track_stock && product.stock <= 0
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -102,7 +104,7 @@ export default async function ProductDetailPage({
             variant={outOfStock ? 'destructive' : 'outline'}
             className={outOfStock ? 'w-fit' : 'w-fit border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
           >
-            {outOfStock ? 'Out of stock' : `${product.stock} in stock`}
+            {outOfStock ? 'Out of stock' : !product.track_stock ? 'Available' : `${product.stock} in stock`}
           </Badge>
 
           <ProductPageActions product={product} refCode={ref ?? null} />

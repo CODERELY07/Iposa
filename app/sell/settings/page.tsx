@@ -3,6 +3,7 @@ import BusinessSettingsForm from '@/components/marketplace/BusinessSettingsForm'
 import AffiliateSettingsForm from '@/components/marketplace/AffiliateSettingsForm'
 import ManagerPinForm from '@/components/business/ManagerPinForm'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import { Store, Link2, KeyRound } from 'lucide-react'
 import type { BusinessAffiliateSettings } from '@/lib/types/marketplace'
 
@@ -18,6 +19,8 @@ export default async function SellSettingsPage() {
     .eq('business_id', business.id)
     .maybeSingle<BusinessAffiliateSettings>()
 
+  const typeMeta = getBusinessTypeMeta(business.business_type)
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
       <div>
@@ -30,12 +33,18 @@ export default async function SellSettingsPage() {
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--brand-violet),transparent_88%)] text-primary">
             <Store className="size-4" />
           </span>
-          <div>
-            <CardTitle>Storefront</CardTitle>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <CardTitle>Storefront</CardTitle>
+              <span className="label-mono rounded-full bg-gradient-brand-soft px-2 py-0.5 text-primary">{typeMeta.shortLabel}</span>
+            </div>
             <CardDescription>Name, description, and branding shown to customers.</CardDescription>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-snug text-muted-foreground">
+            Registered as a <span className="font-medium text-foreground">{typeMeta.label}</span> — {typeMeta.costingSummary}
+          </p>
           <BusinessSettingsForm business={business} />
         </CardContent>
       </Card>

@@ -11,12 +11,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="min-h-screen bg-muted/40">
       <header className="border-b bg-card">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
-          <Link href="/admin/businesses" className="flex shrink-0 items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
+          <Link href="/admin/businesses" className="flex min-w-0 shrink items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
               <ShieldCheck className="size-4" />
             </span>
-            <span className="font-serif text-lg leading-none tracking-tight text-foreground">
-              Iposa <Badge variant="secondary" className="label-mono align-middle">Admin</Badge>
+            <span className="truncate font-serif text-lg leading-none tracking-tight text-foreground">
+              MElocalmarketplace <Badge variant="secondary" className="label-mono align-middle">Admin</Badge>
             </span>
           </Link>
           <nav className="flex items-center gap-3 overflow-x-auto text-xs font-medium text-muted-foreground sm:gap-4 sm:text-sm">

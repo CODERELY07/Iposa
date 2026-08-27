@@ -22,7 +22,7 @@ export default async function BecomeAffiliatePage() {
     <AuthCard
       eyebrow="Affiliate Program"
       title="Become an affiliate"
-      description="Share referral links to shops on Iposa and earn a commission on every sale you bring in. Submit your details for review — once approved, you'll get your own dashboard and referral code."
+      description="Share referral links to shops on MElocalmarketplace and earn a commission on every sale you bring in. Submit your details for review — once approved, you'll get your own dashboard and referral code."
     >
       <RegisterAffiliateForm />
     </AuthCard>

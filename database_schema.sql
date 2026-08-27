@@ -85,10 +85,38 @@ CREATE TABLE IF NOT EXISTS public.businesses (
   logo_url text,
   banner_url text,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  -- Chosen once at registration (see register_business() below) and read by
+  -- the whole /sell dashboard (nav labels, product/service catalog UI, POS,
+  -- analytics) to decide which costing model applies — see
+  -- lib/business/type-meta.ts on the app side for exactly what each value
+  -- changes. All three types still share the same store_products table and
+  -- the same process_sale()/analytics math; only the vocabulary and which
+  -- features are shown differ. 'retail' is the default for pre-existing rows
+  -- created before this column existed, since standalone cost_price (no
+  -- recipe) is what they were already using.
+  --
+  -- 'services' replaced the earlier, narrower 'print_shop' value: printing
+  -- is just one kind of service business among many (repairs, salons,
+  -- cleaning...), so instead of a fixed type per trade, a services business
+  -- builds its own catalog of named services (see store_products.track_stock
+  -- below) rather than getting a different fixed type per trade.
+  business_type text NOT NULL DEFAULT 'retail' CHECK (business_type IN ('restaurant', 'services', 'retail')),
   rejection_reason text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- Additive, in case an earlier run of this script already created this table
+-- without the column — ADD COLUMN with a DEFAULT back-fills existing rows
+-- instead of erroring, so this is safe to re-run even with live data.
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS business_type text NOT NULL DEFAULT 'retail';
+-- Drop the old CHECK before migrating data, since a stricter constraint
+-- would otherwise reject the UPDATE below on a database still holding the
+-- retired 'print_shop' value.
+ALTER TABLE public.businesses DROP CONSTRAINT IF EXISTS businesses_business_type_check;
+UPDATE public.businesses SET business_type = 'services' WHERE business_type = 'print_shop';
+ALTER TABLE public.businesses ADD CONSTRAINT businesses_business_type_check
+  CHECK (business_type IN ('restaurant', 'services', 'retail'));
+
 CREATE INDEX IF NOT EXISTS businesses_status_idx ON public.businesses(status);
 
 DROP TRIGGER IF EXISTS trg_businesses_updated_at ON public.businesses;
@@ -118,6 +146,33 @@ CREATE TRIGGER trg_protect_business_status
   BEFORE UPDATE ON public.businesses
   FOR EACH ROW EXECUTE FUNCTION public.protect_business_status();
 
+-- Same defense-in-depth as protect_business_status() above, for
+-- business_type: it's meant to be a one-time choice made at registration
+-- (see register_business()) that the rest of /sell is built around, not a
+-- field an owner can silently flip via a direct table update — the generic
+-- owner UPDATE policy below has no column-level restriction on its own, so
+-- without this trigger `supabase.from('businesses').update({business_type})`
+-- would otherwise succeed. A super_admin can still correct a wrong choice by
+-- request.
+CREATE OR REPLACE FUNCTION public.protect_business_type()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.business_type IS DISTINCT FROM OLD.business_type AND public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can change a business''s type once registered';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_business_type ON public.businesses;
+CREATE TRIGGER trg_protect_business_type
+  BEFORE UPDATE ON public.businesses
+  FOR EACH ROW EXECUTE FUNCTION public.protect_business_type();
+
 -- =============================================================================
 -- SECTION 3 — SHARED CATEGORY TAXONOMY
 -- Global, not business-scoped: this is what lets the marketplace filter
@@ -136,11 +191,16 @@ CREATE TABLE IF NOT EXISTS public.categories (
 
 -- =============================================================================
 -- SECTION 4 — THE UNIFIED PRODUCT CATALOG
--- One row per product per business. `price`/`stock` are what both POS and
--- the marketplace read. `cost_price` and/or `recipes` (below) are optional —
--- a product with no recipe rows just uses cost_price directly for margin
--- reporting; a product with recipe rows derives its cost (and its live
--- sellable stock) from ingredient consumption instead.
+-- One row per product (or, for a 'services' business, per named service —
+-- same table either way) per business. `price`/`stock` are what both POS
+-- and the marketplace read. `cost_price` and/or `recipes` (below) are
+-- optional — a row with no recipe rows just uses cost_price directly for
+-- margin reporting; a row with recipe rows derives its cost (and its live
+-- sellable stock) from ingredient consumption instead. `track_stock` opts a
+-- row out of stock accounting entirely — for a service like "Photocopy" or
+-- "Battery replacement", there's no finite count to run out of, so it's
+-- always treated as available (see process_sale()/place_order() below)
+-- regardless of whatever `stock` happens to hold.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.store_products (
@@ -155,6 +215,7 @@ CREATE TABLE IF NOT EXISTS public.store_products (
   cost_price numeric(10,2) NOT NULL DEFAULT 0 CHECK (cost_price >= 0),
   price numeric(10,2) NOT NULL CHECK (price >= 0),
   stock integer NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  track_stock boolean NOT NULL DEFAULT true,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -164,6 +225,7 @@ CREATE TABLE IF NOT EXISTS public.store_products (
 -- table without these columns.
 ALTER TABLE public.store_products ADD COLUMN IF NOT EXISTS sku text;
 ALTER TABLE public.store_products ADD COLUMN IF NOT EXISTS cost_price numeric(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.store_products ADD COLUMN IF NOT EXISTS track_stock boolean NOT NULL DEFAULT true;
 
 CREATE INDEX IF NOT EXISTS store_products_business_id_idx ON public.store_products(business_id);
 CREATE INDEX IF NOT EXISTS store_products_category_id_idx ON public.store_products(category_id);
@@ -295,8 +357,15 @@ CREATE TABLE IF NOT EXISTS public.sale_items (
   product_id bigint REFERENCES public.store_products(id) ON DELETE SET NULL,
   quantity integer NOT NULL,
   selling_price numeric NOT NULL,
-  computed_cogs numeric NOT NULL
+  computed_cogs numeric NOT NULL,
+  -- Set only for an ad-hoc "custom item" line rung up with no catalog entry
+  -- (product_id IS NULL) — see process_sale() below. NULL for every ordinary
+  -- catalog line, which gets its name by joining store_products instead.
+  custom_name text
 );
+-- Additive, in case an earlier run of this script created `sale_items`
+-- before custom (non-catalog) line items existed.
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS custom_name text;
 -- Additive: repoint an earlier run's FKs — `product_id` referenced the
 -- now-dropped `products` table, and `sale_id` had no ON DELETE behavior
 -- (voiding a sale relied on cascade + the stock-restore trigger below).
@@ -378,7 +447,9 @@ CREATE TABLE IF NOT EXISTS public.store_order_items (
 CREATE INDEX IF NOT EXISTS store_order_items_order_id_idx ON public.store_order_items(order_id);
 
 -- ---- public read view for the marketplace feed ----
-CREATE OR REPLACE VIEW public.marketplace_products
+DROP VIEW IF EXISTS public.marketplace_products;
+
+CREATE VIEW public.marketplace_products
 WITH (security_invoker = true) AS
 SELECT
   sp.id,
@@ -388,6 +459,7 @@ SELECT
   sp.image_url,
   sp.price,
   sp.stock,
+  sp.track_stock,
   sp.category_id,
   c.name AS category_name,
   c.slug AS category_slug,
@@ -409,7 +481,20 @@ GRANT SELECT ON public.marketplace_products TO anon, authenticated;
 
 -- A logged-in customer registers a storefront. Flips their own role to
 -- business_admin and creates a `pending` business in one atomic step.
-CREATE OR REPLACE FUNCTION public.register_business(p_name text, p_slug text, p_description text DEFAULT NULL)
+-- Signature gained p_business_type (a required choice on the registration
+-- form — see RegisterBusinessForm) after the original 3-arg version below,
+-- so the old overload is dropped explicitly instead of just CREATE OR
+-- REPLACE-d: a different argument list makes Postgres treat it as a
+-- separate overload rather than a replacement, and this file needs to stay
+-- safe to re-run against a database that already has the 3-arg version.
+DROP FUNCTION IF EXISTS public.register_business(text, text, text);
+
+CREATE OR REPLACE FUNCTION public.register_business(
+  p_name text,
+  p_slug text,
+  p_description text DEFAULT NULL,
+  p_business_type text DEFAULT 'retail'
+)
 RETURNS public.businesses
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -442,17 +527,21 @@ BEGIN
     RAISE EXCEPTION 'Business name is required';
   END IF;
 
+  IF p_business_type NOT IN ('restaurant', 'services', 'retail') THEN
+    RAISE EXCEPTION 'Invalid business type: %', p_business_type;
+  END IF;
+
   UPDATE public.profiles SET role = 'business_admin' WHERE id = v_uid;
 
-  INSERT INTO public.businesses (owner_id, name, slug, description, status)
-  VALUES (v_uid, trim(p_name), p_slug, p_description, 'pending')
+  INSERT INTO public.businesses (owner_id, name, slug, description, status, business_type)
+  VALUES (v_uid, trim(p_name), p_slug, p_description, 'pending', p_business_type)
   RETURNING * INTO v_business;
 
   RETURN v_business;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.register_business(text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.register_business(text, text, text, text) TO authenticated;
 
 -- A super_admin approves or rejects a pending business.
 CREATE OR REPLACE FUNCTION public.set_business_status(p_business_id uuid, p_status text, p_rejection_reason text DEFAULT NULL)
@@ -544,6 +633,8 @@ BEGIN
   -- Standalone products are checked against their own stock. Recipe-based
   -- products are skipped here — their `stock` column is always kept at 0 by
   -- convention, so checking it directly would reject every recipe-based order.
+  -- Untracked rows (services — see store_products.track_stock) skip this
+  -- check entirely: there's no finite count to run out of.
   IF EXISTS (
     SELECT 1
     FROM _cart_items c
@@ -552,7 +643,7 @@ BEGIN
     WHERE p.id IS NULL
        OR p.is_active = false
        OR b.status <> 'approved'
-       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+       OR (p.track_stock AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
   ) THEN
     RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
   END IF;
@@ -597,6 +688,7 @@ BEGIN
     FROM _cart_items c
     WHERE p.id = c.product_id
       AND p.business_id = v_business_id
+      AND p.track_stock
       AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
 
     UPDATE public.ingredients i
@@ -624,6 +716,15 @@ GRANT EXECUTE ON FUNCTION public.place_order(jsonb, text, text, text, text) TO a
 -- staff accounts yet), never trusted from the client. Recipe-based products
 -- decrement their ingredients; standalone products decrement their own
 -- stock directly.
+--
+-- Each line in p_items is either a catalog line (product_id set — the
+-- ordinary case for every business type) or an ad-hoc "custom item" line
+-- (product_id NULL, custom_name + custom_price required) for made-to-order
+-- work that was never worth adding to the catalog — a print shop's one-off
+-- oddly-sized job is the motivating case, but any business type can use it.
+-- A custom line skips every stock/ingredient check below (there's no catalog
+-- entry to check against) and costs exactly custom_cost per unit (0 if
+-- omitted, i.e. pure margin) instead of a recipe or cost_price lookup.
 CREATE OR REPLACE FUNCTION public.process_sale(p_total numeric, p_payment numeric, p_change numeric, p_items jsonb)
 RETURNS bigint
 LANGUAGE plpgsql
@@ -652,19 +753,33 @@ BEGIN
     product_id bigint,
     quantity integer,
     price numeric(10,2),
-    subtotal numeric(10,2)
+    subtotal numeric(10,2),
+    custom_name text,
+    custom_cost numeric(10,2)
   ) ON COMMIT DROP;
 
-  INSERT INTO _sale_items (product_id, quantity, price, subtotal)
+  INSERT INTO _sale_items (product_id, quantity, price, subtotal, custom_name, custom_cost)
   SELECT
     (elem->>'product_id')::bigint,
     (elem->>'quantity')::integer,
     (elem->>'price')::numeric,
-    (elem->>'subtotal')::numeric
+    (elem->>'subtotal')::numeric,
+    NULLIF(elem->>'custom_name', ''),
+    COALESCE((elem->>'custom_cost')::numeric, 0)
   FROM jsonb_array_elements(p_items) AS elem;
 
-  IF EXISTS (SELECT 1 FROM _sale_items WHERE quantity <= 0 OR product_id IS NULL) THEN
-    RAISE EXCEPTION 'Invalid quantity in cart';
+  IF EXISTS (SELECT 1 FROM _sale_items WHERE quantity <= 0 OR (product_id IS NULL AND custom_name IS NULL)) THEN
+    RAISE EXCEPTION 'Invalid quantity or missing item details in cart';
+  END IF;
+
+  -- The client already refuses to open a negative price/cost into the cart,
+  -- but that's only a UI courtesy — nothing stops a direct RPC call with a
+  -- crafted p_items. A negative custom price/cost has no legitimate use (a
+  -- discount belongs in price, not below zero) and would otherwise let an
+  -- owner quietly deflate reported revenue or inflate reported profit in
+  -- their own books, so it's rejected here regardless of who calls this.
+  IF EXISTS (SELECT 1 FROM _sale_items WHERE product_id IS NULL AND (price < 0 OR custom_cost < 0)) THEN
+    RAISE EXCEPTION 'Custom item price and cost cannot be negative';
   END IF;
 
   PERFORM 1 FROM public.store_products p
@@ -680,12 +795,17 @@ BEGIN
   -- Standalone products are checked against their own stock. Recipe-based
   -- products are skipped here — their `stock` column is always kept at 0
   -- by convention (the client hardcodes it when a recipe is attached), so
-  -- checking it directly would reject every recipe-based sale.
+  -- checking it directly would reject every recipe-based sale. Ad-hoc
+  -- custom lines (product_id IS NULL) skip this check entirely — there's no
+  -- catalog stock to check. Untracked rows (services — see
+  -- store_products.track_stock) skip it too: there's no finite count to run
+  -- out of, e.g. a "Photocopy" or "Battery replacement" service.
   IF EXISTS (
     SELECT 1 FROM _sale_items c
     LEFT JOIN public.store_products p ON p.id = c.product_id AND p.business_id = v_business_id
-    WHERE p.id IS NULL
-       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+    WHERE c.product_id IS NOT NULL
+      AND (p.id IS NULL
+       OR (p.track_stock AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity))
   ) THEN
     RAISE EXCEPTION 'One or more items are unavailable in the requested quantity';
   END IF;
@@ -693,7 +813,8 @@ BEGIN
   -- Recipe-based products are checked against ingredient supply instead,
   -- aggregated per ingredient — two different products in the same sale
   -- that both consume the same ingredient must be checked against their
-  -- combined total, not independently.
+  -- combined total, not independently. Custom lines never join a recipe
+  -- (product_id NULL), so they're naturally excluded here already.
   IF EXISTS (
     SELECT r.ingredient_id
     FROM _sale_items c
@@ -709,26 +830,37 @@ BEGIN
   VALUES (v_business_id, p_total, p_payment, p_change, v_uid)
   RETURNING id INTO v_sale_id;
 
-  INSERT INTO public.sale_items (sale_id, product_id, quantity, selling_price, computed_cogs)
+  INSERT INTO public.sale_items (sale_id, product_id, quantity, selling_price, computed_cogs, custom_name)
   SELECT
     v_sale_id,
     c.product_id,
     c.quantity,
     c.price,
-    COALESCE(
-      (SELECT SUM(r.quantity_used * i.cost_per_unit)
-         FROM public.recipes r JOIN public.ingredients i ON i.id = r.ingredient_id
-         WHERE r.product_id = c.product_id),
-      (SELECT cost_price FROM public.store_products WHERE id = c.product_id)
-    ) * c.quantity
+    CASE
+      -- A custom line has no store_products/recipes row to look up (and
+      -- COALESCE-ing two NULL subqueries would otherwise insert a NULL into
+      -- a NOT NULL column) — its cost is exactly what was entered for it.
+      WHEN c.product_id IS NULL THEN c.custom_cost * c.quantity
+      ELSE COALESCE(
+        (SELECT SUM(r.quantity_used * i.cost_per_unit)
+           FROM public.recipes r JOIN public.ingredients i ON i.id = r.ingredient_id
+           WHERE r.product_id = c.product_id),
+        (SELECT cost_price FROM public.store_products WHERE id = c.product_id)
+      ) * c.quantity
+    END,
+    c.custom_name
   FROM _sale_items c;
 
-  -- Standalone products decrement their own stock directly...
+  -- Standalone products decrement their own stock directly (a custom line's
+  -- NULL product_id never matches here, so it's naturally skipped; an
+  -- untracked service is excluded by the track_stock check so its stock
+  -- column — always 0 by default — never goes negative)...
   UPDATE public.store_products p
   SET stock = p.stock - c.quantity
   FROM _sale_items c
   WHERE p.id = c.product_id
     AND p.business_id = v_business_id
+    AND p.track_stock
     AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
 
   -- ...recipe-based products decrement the combined ingredient totals they
@@ -1433,6 +1565,8 @@ BEGIN
   -- Standalone products are checked against their own stock. Recipe-based
   -- products are skipped here — their `stock` column is always kept at 0 by
   -- convention, so checking it directly would reject every recipe-based order.
+  -- Untracked rows (services — see store_products.track_stock) skip this
+  -- check entirely: there's no finite count to run out of.
   IF EXISTS (
     SELECT 1
     FROM _cart_items c
@@ -1441,7 +1575,7 @@ BEGIN
     WHERE p.id IS NULL
        OR p.is_active = false
        OR b.status <> 'approved'
-       OR (NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+       OR (p.track_stock AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
   ) THEN
     RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
   END IF;
@@ -1486,6 +1620,7 @@ BEGIN
     FROM _cart_items c
     WHERE p.id = c.product_id
       AND p.business_id = v_business_id
+      AND p.track_stock
       AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
 
     UPDATE public.ingredients i

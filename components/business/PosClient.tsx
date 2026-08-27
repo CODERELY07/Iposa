@@ -4,10 +4,14 @@ import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { CheckCircle2, AlertCircle, Search, ShoppingCart, Minus, Plus, X } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { CheckCircle2, AlertCircle, Search, ShoppingCart, Minus, Plus, X, Sparkles } from 'lucide-react'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import type { BusinessType } from '@/lib/types/marketplace'
 
 type Product = {
   id: number
@@ -17,6 +21,8 @@ type Product = {
   cost_price: number
   price: number
   stock: number
+  // false for a service — always available regardless of `stock`.
+  track_stock: boolean
   categories: { name: string } | null
   recipes?: { ingredient_id: number; quantity_used: number }[]
 }
@@ -24,23 +30,44 @@ type Product = {
 type Category = { id: number; name: string }
 type Ingredient = { id: number; name: string; current_stock: number }
 
-type CartItem = {
-  product: Product
-  quantity: number
-}
+// A catalog line comes straight from the product grid, same as always. A
+// custom line is a made-to-order item that was never worth adding to the
+// catalog (a print shop's one-off oddly-sized job is the motivating case,
+// but every business type can ring one up) — it's priced and costed on the
+// spot instead of looked up, carries no stock/ingredient checks, and is
+// tagged with a client-side `key` (never a real product id) so it can share
+// the same cart list and quantity controls as a catalog line.
+type CatalogCartItem = { kind: 'catalog'; key: string; product: Product; quantity: number }
+type CustomCartItem = { kind: 'custom'; key: string; name: string; price: number; cost: number; quantity: number }
+type CartItem = CatalogCartItem | CustomCartItem
 
 type Props = {
   initialProducts: Product[]
   categories: Category[]
   ingredients: Ingredient[]
+  businessType: BusinessType
 }
 
-export default function PosClient({ initialProducts, categories, ingredients }: Props) {
+function itemName(item: CartItem) {
+  return item.kind === 'catalog' ? item.product.name : item.name
+}
+
+function itemUnitPrice(item: CartItem) {
+  return item.kind === 'catalog' ? Number(item.product.price) : item.price
+}
+
+export default function PosClient({ initialProducts, categories, ingredients, businessType }: Props) {
   const supabase = createClient()
+  const meta = getBusinessTypeMeta(businessType)
   const [products, setProducts] = useState<Product[]>(initialProducts)
   const [cart, setCart] = useState<CartItem[]>([])
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
+
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customName, setCustomName] = useState('')
+  const [customPrice, setCustomPrice] = useState('')
+  const [customCost, setCustomCost] = useState('')
 
   const [cashReceived, setCashReceived] = useState('')
   const [loading, setLoading] = useState(false)
@@ -48,6 +75,9 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const getAvailableStock = (product: Product) => {
+    if (!product.track_stock) {
+      return Infinity
+    }
     if (!product.recipes || product.recipes.length === 0) {
       return product.stock
     }
@@ -78,7 +108,7 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
   }, [products, search, filterCat])
 
   const cartTotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0)
+    return cart.reduce((sum, item) => sum + itemUnitPrice(item) * item.quantity, 0)
   }, [cart])
 
   const totalItems = useMemo(() => {
@@ -96,35 +126,61 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
     if (availableStock <= 0) return
 
     setCart(prev => {
-      const existing = prev.find(item => item.product.id === product.id)
+      const existing = prev.find(item => item.kind === 'catalog' && item.product.id === product.id)
       if (existing) {
         if (existing.quantity >= availableStock) return prev
         return prev.map(item =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item === existing ? { ...item, quantity: item.quantity + 1 } : item
         )
       }
-      return [...prev, { product, quantity: 1 }]
+      return [...prev, { kind: 'catalog', key: `p-${product.id}`, product, quantity: 1 }]
     })
     setSuccessMessage(null)
     setErrorMessage(null)
   }
 
-  function updateQuantity(productId: number, amount: number) {
+  function addCustomItem() {
+    const price = parseFloat(customPrice)
+    if (!customName.trim() || isNaN(price) || price < 0) return
+    const cost = parseFloat(customCost)
+
+    setCart(prev => [
+      ...prev,
+      {
+        kind: 'custom',
+        key: `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: customName.trim(),
+        price,
+        cost: isNaN(cost) ? 0 : cost,
+        quantity: 1,
+      },
+    ])
+    setCustomName('')
+    setCustomPrice('')
+    setCustomCost('')
+    setCustomOpen(false)
+    setSuccessMessage(null)
+    setErrorMessage(null)
+  }
+
+  function updateQuantity(key: string, amount: number) {
     setCart(prev =>
       prev
         .map(item => {
-          if (item.product.id !== productId) return item
+          if (item.key !== key) return item
           const newQty = item.quantity + amount
-          const availableStock = getAvailableStock(item.product)
-          if (newQty > availableStock) return item
+          if (item.kind === 'catalog') {
+            const availableStock = getAvailableStock(item.product)
+            if (newQty > availableStock) return item
+          }
           return { ...item, quantity: newQty }
         })
         .filter(item => item.quantity > 0)
     )
   }
 
-  function removeItem(productId: number) {
-    setCart(prev => prev.filter(item => item.product.id !== productId))
+  function removeItem(key: string) {
+    setCart(prev => prev.filter(item => item.key !== key))
   }
 
   function clearCart() {
@@ -146,12 +202,23 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
 
     setLoading(true)
 
-    const payloadItems = cart.map(item => ({
-      product_id: item.product.id,
-      quantity: item.quantity,
-      price: item.product.price,
-      subtotal: item.product.price * item.quantity,
-    }))
+    const payloadItems = cart.map(item =>
+      item.kind === 'catalog'
+        ? {
+            product_id: item.product.id,
+            quantity: item.quantity,
+            price: item.product.price,
+            subtotal: item.product.price * item.quantity,
+          }
+        : {
+            product_id: null,
+            quantity: item.quantity,
+            price: item.price,
+            subtotal: item.price * item.quantity,
+            custom_name: item.name,
+            custom_cost: item.cost,
+          }
+    )
 
     const { data: saleId, error } = await supabase.rpc('process_sale', {
       p_total: cartTotal,
@@ -168,7 +235,7 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
 
     setProducts(prevProducts =>
       prevProducts.map(prod => {
-        const soldItem = cart.find(item => item.product.id === prod.id)
+        const soldItem = cart.find(item => item.kind === 'catalog' && item.product.id === prod.id)
         return soldItem ? { ...prod, stock: Math.max(0, prod.stock - soldItem.quantity) } : prod
       })
     )
@@ -177,6 +244,8 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
     clearCart()
     setLoading(false)
   }
+
+  const customButtonLabel = businessType === 'services' ? 'New Custom Job' : 'Add Custom Item'
 
   return (
     <div className="flex h-full flex-col bg-muted/30 lg:mx-auto lg:max-w-[1600px] lg:flex-row lg:overflow-hidden">
@@ -217,6 +286,15 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
               ))}
             </SelectContent>
           </Select>
+          {meta.customItemEmphasis === 'primary' ? (
+            <Button type="button" onClick={() => setCustomOpen(true)} className="shrink-0">
+              <Sparkles /> {customButtonLabel}
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" onClick={() => setCustomOpen(true)} className="shrink-0">
+              <Plus /> Custom item
+            </Button>
+          )}
         </div>
 
         <div className="lg:flex-1 lg:overflow-y-auto lg:pr-1">
@@ -232,7 +310,7 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
               {filteredProducts.map(p => {
                 const liveStock = getAvailableStock(p)
                 const isOutOfStock = liveStock <= 0
-                const cartItem = cart.find(item => item.product.id === p.id)
+                const cartItem = cart.find(item => item.kind === 'catalog' && item.product.id === p.id)
                 const isMaxed = cartItem ? cartItem.quantity >= liveStock : false
 
                 return (
@@ -264,7 +342,7 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
                         variant={isOutOfStock ? 'destructive' : 'outline'}
                         className={isOutOfStock ? '' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
                       >
-                        {isOutOfStock ? 'Sold Out' : `${liveStock} units`}
+                        {isOutOfStock ? 'Sold Out' : !p.track_stock ? 'Available' : `${liveStock} units`}
                       </Badge>
                     </div>
                   </button>
@@ -298,10 +376,15 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.product.id} className="flex items-center justify-between gap-3 py-3.5">
+              <div key={item.key} className="flex items-center justify-between gap-3 py-3.5">
                 <div className="min-w-0 flex-1">
-                  <h4 className="truncate text-sm font-medium text-foreground">{item.product.name}</h4>
-                  <p className="mt-0.5 text-xs text-muted-foreground">₱{Number(item.product.price).toFixed(2)} each</p>
+                  <div className="flex items-center gap-1.5">
+                    <h4 className="truncate text-sm font-medium text-foreground">{itemName(item)}</h4>
+                    {item.kind === 'custom' && (
+                      <Badge variant="outline" className="shrink-0 border-primary/30 text-[10px] text-primary">Custom</Badge>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">₱{itemUnitPrice(item).toFixed(2)} each</p>
                 </div>
 
                 <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
@@ -310,7 +393,7 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
                     variant="secondary"
                     size="icon-sm"
                     disabled={loading}
-                    onClick={() => updateQuantity(item.product.id, -1)}
+                    onClick={() => updateQuantity(item.key, -1)}
                     aria-label="Decrease quantity"
                   >
                     <Minus />
@@ -320,8 +403,8 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
                     type="button"
                     variant="secondary"
                     size="icon-sm"
-                    disabled={item.quantity >= getAvailableStock(item.product) || loading}
-                    onClick={() => updateQuantity(item.product.id, 1)}
+                    disabled={(item.kind === 'catalog' && item.quantity >= getAvailableStock(item.product)) || loading}
+                    onClick={() => updateQuantity(item.key, 1)}
                     aria-label="Increase quantity"
                   >
                     <Plus />
@@ -330,12 +413,12 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
 
                 <div className="min-w-[70px] text-right">
                   <span className="block text-sm font-semibold text-foreground">
-                    ₱{(item.product.price * item.quantity).toFixed(2)}
+                    ₱{(itemUnitPrice(item) * item.quantity).toFixed(2)}
                   </span>
                   {!loading && (
                     <button
                       type="button"
-                      onClick={() => removeItem(item.product.id)}
+                      onClick={() => removeItem(item.key)}
                       className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground transition-colors hover:text-destructive"
                     >
                       <X className="size-2.5" /> Remove
@@ -393,6 +476,69 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
         </div>
       </form>
 
+      <Dialog open={customOpen} onOpenChange={setCustomOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{customButtonLabel}</DialogTitle>
+            <DialogDescription>
+              For made-to-order work that isn&apos;t in your catalog — priced and costed right here, with no stock to track.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="custom-name">Description *</Label>
+              <Input
+                id="custom-name"
+                autoFocus
+                placeholder={businessType === 'services' ? 'e.g., Rush same-day repair, custom quote' : 'e.g., Special request'}
+                value={customName}
+                onChange={e => setCustomName(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="custom-price">Price charged (₱) *</Label>
+                <Input
+                  id="custom-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={customPrice}
+                  onChange={e => setCustomPrice(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="custom-cost">Your cost (₱)</Label>
+                <Input
+                  id="custom-cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={customCost}
+                  onChange={e => setCustomCost(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Cost is optional — leave it blank if this is pure margin. Either way it flows straight into your Analytics profit numbers, same as a catalog sale.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCustomOpen(false)}>Cancel</Button>
+            <Button
+              type="button"
+              onClick={addCustomItem}
+              disabled={!customName.trim() || customPrice === '' || isNaN(parseFloat(customPrice)) || parseFloat(customPrice) < 0}
+            >
+              Add to ticket
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

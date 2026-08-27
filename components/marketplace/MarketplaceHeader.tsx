@@ -61,7 +61,7 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
       {(role === null || role === 'customer') && (
         <>
           <Link href="/register-business" className={navLinkClass}>
-            Sell on Iposa
+            Sell on MElocalmarketplace
           </Link>
           <Link href="/become-affiliate" className={navLinkClass}>
             Become an Affiliate
@@ -85,11 +85,11 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
             </SheetTrigger>
             <SheetContent side="left">
               <SheetHeader>
-                <SheetTitle className="flex items-center gap-2 font-serif text-lg">
-                  <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
+                <SheetTitle className="flex min-w-0 items-center gap-2 font-serif text-lg">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
                     <PackageSearch className="size-4" />
                   </span>
-                  Iposa
+                  <span className="truncate">MElocalmarketplace</span>
                 </SheetTitle>
               </SheetHeader>
               <nav className="flex flex-col gap-4 px-4 pb-4 text-sm">{navLinks}</nav>
@@ -101,12 +101,12 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
             </SheetContent>
           </Sheet>
 
-          <Link href="/" className="group flex items-center gap-2">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary transition-transform group-hover:scale-105">
+          <Link href="/" className="group flex min-w-0 items-center gap-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary transition-transform group-hover:scale-105">
               <PackageSearch className="size-4.5" />
             </span>
-            <span className="font-serif text-[25px] leading-none tracking-tight text-foreground">
-              Iposa<span className="hidden italic text-gradient-brand sm:inline"> Marketplace</span>
+            <span className="truncate font-serif text-[25px] leading-none tracking-tight text-foreground">
+              MElocalmarketplace
             </span>
           </Link>
         </div>

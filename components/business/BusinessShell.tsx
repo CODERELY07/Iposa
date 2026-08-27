@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import type { Business } from '@/lib/types/marketplace'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import SignOutButton from '@/components/auth/SignOutButton'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -27,31 +28,49 @@ import {
   PanelLeftOpen,
 } from 'lucide-react'
 
-const navSections: { section: string; items: { href: string; label: string; icon: typeof LayoutDashboard; color: NavColor }[] }[] = [
-  {
-    section: 'Main',
-    items: [
-      { href: '/sell', label: 'Overview', icon: LayoutDashboard, color: 'emerald' },
-      { href: '/sell/pos', label: 'POS', icon: CreditCard, color: 'sky' },
-    ],
-  },
-  {
-    section: 'Catalog',
-    items: [
-      { href: '/sell/products', label: 'Products', icon: Package, color: 'violet' },
-      { href: '/sell/categories', label: 'Categories', icon: Tag, color: 'amber' },
-      { href: '/sell/ingredients', label: 'Ingredients', icon: Soup, color: 'rose' },
-    ],
-  },
-  {
-    section: 'Sales',
-    items: [
-      { href: '/sell/orders', label: 'Online Orders', icon: Receipt, color: 'indigo' },
-      { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
-      { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
-    ],
-  },
-]
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; color: NavColor }
+
+// Ingredients only appears for business types that actually use a
+// bill-of-materials — a retail or services business has nothing to build a
+// recipe out of (see lib/business/type-meta.ts), so that item is entirely
+// conditional on the business's own type instead of one fixed nav for every
+// shop. The Products/Services item itself always appears, just relabeled.
+function getNavSections(business: Business): { section: string; items: NavItem[] }[] {
+  const meta = getBusinessTypeMeta(business.business_type)
+
+  return [
+    {
+      section: 'Main',
+      items: [
+        { href: '/sell', label: 'Overview', icon: LayoutDashboard, color: 'emerald' },
+        { href: '/sell/pos', label: 'POS', icon: CreditCard, color: 'sky' },
+      ],
+    },
+    {
+      section: 'Catalog',
+      items: [
+        { href: '/sell/products', label: meta.catalogLabel, icon: Package, color: 'violet' },
+        { href: '/sell/categories', label: 'Categories', icon: Tag, color: 'amber' },
+        ...(meta.showMaterialsNav
+          ? [{
+              href: '/sell/ingredients',
+              label: meta.materialLabel,
+              icon: Soup,
+              color: 'rose' as NavColor,
+            }]
+          : []),
+      ],
+    },
+    {
+      section: 'Sales',
+      items: [
+        { href: '/sell/orders', label: 'Online Orders', icon: Receipt, color: 'indigo' },
+        { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
+        { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
+      ],
+    },
+  ]
+}
 
 const COLLAPSE_KEY = 'iposa.sell.sidebar.collapsed'
 
@@ -60,6 +79,8 @@ export default function BusinessShell({ business, children }: { business: Busine
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const isActive = (href: string) => (href === '/sell' ? pathname === '/sell' : pathname.startsWith(href))
+  const navSections = getNavSections(business)
+  const typeMeta = getBusinessTypeMeta(business.business_type)
   // The mobile drawer must always show the full nav regardless of the
   // desktop collapse preference — it's only ever open on mobile, where the
   // `md:w-16`/`md:hidden` CSS below never applies anyway, but SidebarNavLink
@@ -110,12 +131,12 @@ export default function BusinessShell({ business, children }: { business: Busine
         } ${collapsed ? 'md:w-16' : 'md:w-64'}`}
       >
         <div className={`flex h-14 items-center border-b ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
-          <Link href="/" className={`flex items-center gap-2 ${collapsed ? 'md:hidden' : ''}`}>
+          <Link href="/" className={`flex min-w-0 items-center gap-2 ${collapsed ? 'md:hidden' : ''}`}>
             <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
               <PackageSearch className="size-4" />
             </span>
-            <span className="font-serif text-base leading-none tracking-tight text-foreground transition-colors hover:text-primary">
-              Iposa <span className="font-sans text-sm font-normal text-muted-foreground">Seller</span>
+            <span className="truncate font-serif text-base leading-none tracking-tight text-foreground transition-colors hover:text-primary" title="MElocalmarketplace Seller">
+              MElocalmarketplace <span className="font-sans text-sm font-normal text-muted-foreground">Seller</span>
             </span>
           </Link>
           {collapsed && (
@@ -136,7 +157,10 @@ export default function BusinessShell({ business, children }: { business: Busine
 
         <div className={`px-4 pb-2 pt-4 ${collapsed ? 'md:hidden' : ''}`}>
           <p className="truncate text-sm font-bold text-foreground">{business.name}</p>
-          <Link href={`/shop/${business.slug}`} className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline">
+          <span className="label-mono mt-1 inline-flex w-fit items-center rounded-full bg-gradient-brand-soft px-2 py-0.5 text-primary">
+            {typeMeta.shortLabel}
+          </span>
+          <Link href={`/shop/${business.slug}`} className="mt-1.5 flex items-center gap-0.5 text-xs text-primary hover:underline">
             View my shop <ArrowUpRight className="size-3" />
           </Link>
         </div>

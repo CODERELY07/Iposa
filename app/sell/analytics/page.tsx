@@ -23,7 +23,7 @@ export default async function SellAnalyticsPage() {
     supabase.from('sales').select('total, created_at').eq('business_id', business.id).gte('created_at', startOfMonth),
     supabase
       .from('sale_items')
-      .select('quantity, selling_price, product_id, sales!inner(created_at, business_id), store_products(name, cost_price, category_id)')
+      .select('quantity, selling_price, product_id, custom_name, computed_cogs, sales!inner(created_at, business_id), store_products(name, cost_price, category_id)')
       .eq('sales.business_id', business.id),
     supabase.from('operating_expenses').select('amount').eq('business_id', business.id).gte('billing_period', startOfMonth),
     supabase.from('ingredients').select('id, name, current_stock, min_stock_alert, cost_per_unit').eq('business_id', business.id),
@@ -87,17 +87,28 @@ export default async function SellAnalyticsPage() {
   itemsRaw.forEach(item => {
     const prod = item.store_products as unknown as { name: string; cost_price: number } | null
     const productId = item.product_id
-    const prodName = prod?.name ?? 'Unknown Item'
+    // A custom (non-catalog) line has no store_products row — fall back to
+    // the free-text name it was rung up with, same as the receipt drawer.
+    const prodName = prod?.name ?? item.custom_name ?? 'Unknown Item'
     const catName = (productId && productCategoryNameMap[productId]) ?? 'Standard Catalog'
 
     const qty = Number(item.quantity || 0)
     const sPrice = Number(item.selling_price || 0)
-
-    const recipeCost = (productId && productCostMap[productId]) ?? 0
-    const finalUnitCogs = recipeCost > 0 ? recipeCost : Number(prod?.cost_price || 0)
-
     const calculatedItemTotalRevenue = sPrice * qty
-    const calculatedItemTotalCogs = finalUnitCogs * qty
+
+    // Catalog lines recompute cost live from current recipe/cost_price data
+    // (so an ingredient price change is reflected retroactively across past
+    // sales, not just future ones). A custom line has no such live source —
+    // its cost was a one-time manual entry at sale time — so it uses the
+    // computed_cogs process_sale() already stored for that exact line.
+    let calculatedItemTotalCogs: number
+    if (productId) {
+      const recipeCost = productCostMap[productId] ?? 0
+      const finalUnitCogs = recipeCost > 0 ? recipeCost : Number(prod?.cost_price || 0)
+      calculatedItemTotalCogs = finalUnitCogs * qty
+    } else {
+      calculatedItemTotalCogs = Number(item.computed_cogs || 0)
+    }
 
     grossRevenue += calculatedItemTotalRevenue
     totalCOGS += calculatedItemTotalCogs
@@ -149,6 +160,7 @@ export default async function SellAnalyticsPage() {
 
   return (
     <AnalyticsClient
+      businessType={business.business_type}
       salesRaw={salesRaw}
       topProducts={topProducts}
       categoryShares={categoryShares}

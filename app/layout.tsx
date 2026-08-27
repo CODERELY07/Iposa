@@ -26,15 +26,15 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Iposa — Sell, Manage, and Grow Your Business",
+  title: "MElocalmarketplace — Sell, Manage, and Grow Your Business",
   description: "The all-in-one platform for local shops: point of sale, inventory, an online storefront, and an affiliate program in one place.",
-  keywords: "iposa, marketplace, POS, inventory, online store, affiliate program",
-  authors: [{ name: "Iposa" }],
+  keywords: "melocalmarketplace, marketplace, POS, inventory, online store, affiliate program",
+  authors: [{ name: "MElocalmarketplace" }],
   openGraph: {
     type: "website",
     locale: "en_US",
     url: "/",
-    title: "Iposa",
+    title: "MElocalmarketplace",
     description: "Sell in person and online, all from one dashboard.",
   }
 };

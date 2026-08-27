@@ -34,6 +34,7 @@ export default async function SellProductsPage() {
       initialProducts={products ?? []}
       categories={categories ?? []}
       ingredients={ingredients ?? []}
+      businessType={business.business_type}
       onSaveAction={saveProductAction}
       onDeleteAction={deleteProductAction}
     />

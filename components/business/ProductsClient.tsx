@@ -15,11 +15,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Plus, Search, PackageSearch, X } from 'lucide-react'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import type { BusinessType } from '@/lib/types/marketplace'
 
 type Props = {
   initialProducts: StoreProduct[]
   categories: StoreCategory[]
   ingredients: Ingredient[]
+  businessType: BusinessType
   onSaveAction: (payload: {
     id: number | null
     name: string
@@ -53,7 +56,8 @@ function unitLabel(unitType: string) {
   return unitType === 'pieces' ? 'pcs' : unitType === 'grams' ? 'g' : 'ml'
 }
 
-export default function ProductsClient({ initialProducts, categories, ingredients, onSaveAction, onDeleteAction }: Props) {
+export default function ProductsClient({ initialProducts, categories, ingredients, businessType, onSaveAction, onDeleteAction }: Props) {
+  const meta = getBusinessTypeMeta(businessType)
   const [isPending, startTransition] = useTransition()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<StoreProduct | null>(null)
@@ -197,7 +201,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('Are you sure you want to delete this product?')) return
+    if (!confirm(`Are you sure you want to delete this ${meta.catalogLabelSingular.toLowerCase()}?`)) return
     setDeleteId(id)
     try {
       await onDeleteAction(id)
@@ -212,11 +216,13 @@ export default function ProductsClient({ initialProducts, categories, ingredient
     <div className="mx-auto max-w-7xl p-4 sm:p-6">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Products</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">{filtered.length} products &middot; sold in-store via POS and listed on your marketplace shop</p>
+          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">{meta.catalogLabel}</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {filtered.length} {meta.catalogLabel.toLowerCase()} &middot; sold in-store via POS and listed on your marketplace shop
+          </p>
         </div>
         <Button onClick={openCreate} className="shrink-0 self-start sm:self-auto">
-          <Plus /> Add Product
+          <Plus /> Add {meta.catalogLabelSingular}
         </Button>
       </div>
 
@@ -224,7 +230,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search catalog items..."
+            placeholder={`Search ${meta.catalogLabel.toLowerCase()}...`}
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="bg-background pl-8"
@@ -250,8 +256,8 @@ export default function ProductsClient({ initialProducts, categories, ingredient
               <TableHead className="p-4 font-mono text-[11px]">SKU</TableHead>
               <TableHead className="p-4 text-right">Cost</TableHead>
               <TableHead className="p-4 text-right">Price</TableHead>
-              <TableHead className="p-4 text-center">Type</TableHead>
-              <TableHead className="p-4 text-center">Stock</TableHead>
+              {meta.tracksStock && <TableHead className="p-4 text-center">Type</TableHead>}
+              {meta.tracksStock && <TableHead className="p-4 text-center">Stock</TableHead>}
               <TableHead className="p-4 text-center">Listed</TableHead>
               <TableHead className="p-4" />
             </TableRow>
@@ -282,20 +288,24 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                   <TableCell className="p-4 text-right font-mono text-foreground">
                     ₱{totalCostForAnalytics.toFixed(2)}
                     <span className="block font-sans text-[9px] font-bold text-muted-foreground">
-                      {hasRecipe ? '(Recipe Cost)' : '(Supplier Cost)'}
+                      {hasRecipe ? `(${meta.recipeLabel} Cost)` : '(Supplier Cost)'}
                     </span>
                   </TableCell>
                   <TableCell className="p-4 text-right font-mono font-bold text-foreground">₱{Number(p.price).toFixed(2)}</TableCell>
-                  <TableCell className="p-4 text-center">
-                    <Badge variant={hasRecipe ? 'default' : 'outline'} className="font-mono uppercase tracking-wider">
-                      {hasRecipe ? 'Recipe' : 'Standalone'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="p-4 text-center">
-                    <Badge variant={dynamicStock === 0 ? 'destructive' : 'secondary'} className={dynamicStock !== 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : ''}>
-                      {dynamicStock} units
-                    </Badge>
-                  </TableCell>
+                  {meta.tracksStock && (
+                    <TableCell className="p-4 text-center">
+                      <Badge variant={hasRecipe ? 'default' : 'outline'} className="font-mono uppercase tracking-wider">
+                        {hasRecipe ? meta.recipeLabel : 'Standalone'}
+                      </Badge>
+                    </TableCell>
+                  )}
+                  {meta.tracksStock && (
+                    <TableCell className="p-4 text-center">
+                      <Badge variant={dynamicStock === 0 ? 'destructive' : 'secondary'} className={dynamicStock !== 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : ''}>
+                        {dynamicStock} units
+                      </Badge>
+                    </TableCell>
+                  )}
                   <TableCell className="p-4 text-center">
                     <Badge variant={p.is_active ? 'default' : 'secondary'} className="font-mono uppercase tracking-wider">
                       {p.is_active ? 'Active' : 'Hidden'}
@@ -304,7 +314,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                   <TableCell className="p-4 text-right">
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEdit(p)}>Edit</Button>
-                      <Button variant="destructive" size="icon-sm" onClick={() => handleDelete(p.id)} disabled={deleteId === p.id} aria-label="Delete product">
+                      <Button variant="destructive" size="icon-sm" onClick={() => handleDelete(p.id)} disabled={deleteId === p.id} aria-label={`Delete ${meta.catalogLabelSingular.toLowerCase()}`}>
                         <X />
                       </Button>
                     </div>
@@ -314,12 +324,12 @@ export default function ProductsClient({ initialProducts, categories, ingredient
             })}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="p-10 text-center text-muted-foreground">
+                <TableCell colSpan={meta.tracksStock ? 9 : 7} className="p-10 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
                       <PackageSearch className="size-5 text-primary" />
                     </span>
-                    No products yet.
+                    No {meta.catalogLabel.toLowerCase()} yet.
                   </div>
                 </TableCell>
               </TableRow>
@@ -331,8 +341,12 @@ export default function ProductsClient({ initialProducts, categories, ingredient
       <Dialog open={modalOpen} onOpenChange={open => !open && closeModal()}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit Product' : 'Add Product'}</DialogTitle>
-            <DialogDescription>Stock configurations adapt automatically based on your raw ingredient consumption.</DialogDescription>
+            <DialogTitle>{editing ? `Edit ${meta.catalogLabelSingular}` : `Add ${meta.catalogLabelSingular}`}</DialogTitle>
+            <DialogDescription>
+              {meta.tracksStock
+                ? 'Stock configurations adapt automatically based on your raw ingredient consumption.'
+                : `${meta.catalogLabelSingular}s are always available to sell — there's no stock to track.`}
+            </DialogDescription>
           </DialogHeader>
 
           {error && (
@@ -345,8 +359,13 @@ export default function ProductsClient({ initialProducts, categories, ingredient
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Product Name *</Label>
-                <Input required autoFocus placeholder="e.g., Sisig Rice Bowl" {...field('name')} />
+                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">{meta.catalogLabelSingular} Name *</Label>
+                <Input
+                  required
+                  autoFocus
+                  placeholder={meta.tracksStock ? 'e.g., Sisig Rice Bowl' : 'e.g., Photocopy, Battery Replacement'}
+                  {...field('name')}
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Category</Label>
@@ -363,34 +382,36 @@ export default function ProductsClient({ initialProducts, categories, ingredient
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className={`grid grid-cols-1 gap-3 ${meta.tracksStock ? 'sm:grid-cols-2' : ''}`}>
               <div className="space-y-1">
                 <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">SKU / Barcode</Label>
                 <Input placeholder="e.g., RET-COKE" {...field('sku')} />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">
-                  Stock
-                  {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Calculated)</span>}
-                </Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  disabled={recipeItems.length > 0}
-                  value={recipeItems.length > 0 ? (liveFormRecipeStock ?? 0) : form.stock}
-                  onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
-                  className="font-bold"
-                />
-              </div>
+              {meta.tracksStock && (
+                <div className="space-y-1">
+                  <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">
+                    Stock
+                    {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Calculated)</span>}
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                    disabled={recipeItems.length > 0}
+                    value={recipeItems.length > 0 ? (liveFormRecipeStock ?? 0) : form.stock}
+                    onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
+                    className="font-bold"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/40 p-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-muted-foreground">
                   Cost Price (₱)
-                  {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Bypassed by Recipe)</span>}
+                  {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Bypassed by {meta.recipeLabel})</span>}
                 </Label>
                 <Input
                   type="number"
@@ -426,16 +447,19 @@ export default function ProductsClient({ initialProducts, categories, ingredient
               Visible on your public marketplace shop
             </Label>
 
-            {/* SECTION: Recipe Assembly */}
+            {/* SECTION: Recipe/materials assembly — a retail business has no
+                bill of materials to build (see lib/business/type-meta.ts),
+                so this whole section is hidden rather than shown empty. */}
+            {meta.showRecipeSection && (
             <div className="border-t pt-4">
-              <h3 className="mb-1 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Recipe Construction</h3>
-              <p className="mb-3 text-[10px] text-muted-foreground">Adding ingredients locks manual stock and computes available units from your ingredient inventory.</p>
+              <h3 className="mb-1 text-xs font-bold font-mono uppercase tracking-wider text-foreground">{meta.recipeLabel} Construction</h3>
+              <p className="mb-3 text-[10px] text-muted-foreground">Adding {meta.materialLabelSingular}s locks manual stock and computes available units from your {meta.materialLabel.toLowerCase()} inventory.</p>
 
               <div className="mb-3 flex items-end gap-2 rounded-lg border bg-muted/40 p-2">
                 <div className="flex-1 space-y-1">
-                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Ingredient</Label>
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">{meta.materialLabelSingular}</Label>
                   <Select value={selectedIngredientId} onValueChange={v => setSelectedIngredientId(v ?? '')}>
-                    <SelectTrigger size="sm" className="w-full bg-background"><SelectValue placeholder="-- Choose Ingredient --" /></SelectTrigger>
+                    <SelectTrigger size="sm" className="w-full bg-background"><SelectValue placeholder={`-- Choose ${meta.materialLabelSingular} --`} /></SelectTrigger>
                     <SelectContent>
                       {ingredients.map(ing => (
                         <SelectItem key={ing.id} value={String(ing.id)}>
@@ -474,7 +498,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                               size="icon-xs"
                               onClick={() => removeIngredientFromRecipe(item.ingredient_id)}
                               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              aria-label="Remove ingredient"
+                              aria-label={`Remove ${meta.materialLabelSingular}`}
                             >
                               <X />
                             </Button>
@@ -483,18 +507,19 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                       )
                     })}
                     <div className="mt-2 flex justify-between rounded-lg border bg-muted/40 p-2 text-xs font-bold text-foreground">
-                      <div>Recipe Cost: <span className="font-mono text-primary">₱{currentRecipeCost.toFixed(2)}</span></div>
+                      <div>{meta.recipeLabel} Cost: <span className="font-mono text-primary">₱{currentRecipeCost.toFixed(2)}</span></div>
                       <div>Max Yield: <span className="font-mono text-emerald-600 dark:text-emerald-400">{liveFormRecipeStock} units</span></div>
                     </div>
                   </div>
                 )}
               </div>
             </div>
+            )}
 
             <DialogFooter className="-mx-4 -mb-4 border-t bg-transparent p-0 pt-4 sm:justify-stretch">
               <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>Cancel</Button>
               <Button type="submit" disabled={isPending} className="flex-1">
-                {isPending ? 'Saving…' : editing ? 'Save changes' : 'Create Product'}
+                {isPending ? 'Saving…' : editing ? 'Save changes' : `Create ${meta.catalogLabelSingular}`}
               </Button>
             </DialogFooter>
           </form>

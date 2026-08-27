@@ -77,12 +77,12 @@ export default function AffiliateShell({ affiliate, children }: { affiliate: Aff
         } ${collapsed ? 'md:w-16' : 'md:w-64'}`}
       >
         <div className={`flex h-14 items-center border-b ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
-          <Link href="/" className={`flex items-center gap-2 ${collapsed ? 'md:hidden' : ''}`}>
+          <Link href="/" className={`flex min-w-0 items-center gap-2 ${collapsed ? 'md:hidden' : ''}`}>
             <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
               <PackageSearch className="size-4" />
             </span>
-            <span className="font-serif text-base leading-none tracking-tight text-foreground transition-colors hover:text-primary">
-              Iposa <span className="font-sans text-sm font-normal text-muted-foreground">Affiliate</span>
+            <span className="truncate font-serif text-base leading-none tracking-tight text-foreground transition-colors hover:text-primary" title="MElocalmarketplace Affiliate">
+              MElocalmarketplace <span className="font-sans text-sm font-normal text-muted-foreground">Affiliate</span>
             </span>
           </Link>
           {collapsed && (

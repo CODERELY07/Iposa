@@ -1,5 +1,13 @@
 export type BusinessStatus = 'pending' | 'approved' | 'rejected'
 
+// Chosen once at registration (see RegisterBusinessForm) and drives which
+// costing model the whole /sell dashboard uses for that business — see
+// lib/business/type-meta.ts for what each type changes and why. 'services'
+// covers any business that sells named services rather than physical stock
+// (printing, repairs, salons...) — it replaced the earlier, narrower
+// 'print_shop' value.
+export type BusinessType = 'restaurant' | 'services' | 'retail'
+
 export type Business = {
   id: string
   owner_id: string
@@ -9,6 +17,7 @@ export type Business = {
   logo_url: string | null
   banner_url: string | null
   status: BusinessStatus
+  business_type: BusinessType
   rejection_reason: string | null
   created_at: string
   updated_at: string
@@ -33,6 +42,9 @@ export type StoreProduct = {
   cost_price: number
   price: number
   stock: number
+  // false for a service (see lib/business/type-meta.ts) — it's always
+  // treated as available regardless of `stock`, which is unused in that case.
+  track_stock: boolean
   is_active: boolean
   created_at: string
   updated_at: string
@@ -67,6 +79,7 @@ export type MarketplaceProduct = {
   image_url: string | null
   price: number
   stock: number
+  track_stock: boolean
   category_id: number | null
   category_name: string | null
   category_slug: string | null

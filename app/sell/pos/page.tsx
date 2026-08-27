@@ -46,6 +46,7 @@ export default async function SellPosPage() {
       initialProducts={products ?? []}
       categories={categories ?? []}
       ingredients={ingredients ?? []}
+      businessType={business.business_type}
     />
   )
 }

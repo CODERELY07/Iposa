@@ -13,7 +13,9 @@ import { PackageOpen, Plus, Check } from 'lucide-react'
 export default function ProductCard({ product }: { product: MarketplaceProduct }) {
   const { addItem } = useCart()
   const [added, setAdded] = useState(false)
-  const outOfStock = product.stock <= 0
+  // A service (see lib/business/type-meta.ts) never carries a finite stock
+  // count — it's always available regardless of `stock`.
+  const outOfStock = product.track_stock && product.stock <= 0
   const productHref = `/shop/${product.business_slug}/${product.slug}`
 
   function handleAdd() {

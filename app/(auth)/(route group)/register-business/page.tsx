@@ -20,9 +20,10 @@ export default async function RegisterBusinessPage() {
 
   return (
     <AuthCard
-      eyebrow="Sell on Iposa"
+      eyebrow="Sell on MElocalmarketplace"
       title="Register your shop"
       description="Submit your storefront for review. Once approved, you can manage products and orders."
+      className="max-w-2xl"
     >
       <RegisterBusinessForm />
     </AuthCard>
