@@ -3,6 +3,12 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import AuthCard from '@/components/marketplace/AuthCard'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 
 export default function SignUpPage() {
   const supabase = createClient()
@@ -47,46 +53,50 @@ export default function SignUpPage() {
 
   if (success) {
     return (
-      <div className="w-full max-w-sm bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm">
-        <p className="text-xs font-semibold tracking-widest uppercase text-emerald-700 mb-2">
-          Almost there
-        </p>
-        <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Check your email</h1>
-        <p className="text-sm text-zinc-500 mb-6">
-          We sent a confirmation link to <span className="font-medium text-zinc-700">{email}</span>.
-          Click it to activate your account.
-        </p>
-        <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-3 py-2.5">
-          <span className="mt-px">✓</span>
-          <span>Confirmation email sent. You can close this tab.</span>
-        </div>
-        <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center gap-1 text-sm text-zinc-500">
-          <span>Already confirmed?</span>
-          <Link href="/login" className="text-emerald-700 font-medium hover:underline">Sign in</Link>
-        </div>
-      </div>
+      <AuthCard
+        eyebrow="Almost there"
+        title="Check your email"
+        description={`We sent a confirmation link to ${email}. Click it to activate your account.`}
+        footer={
+          <>
+            <span>Already confirmed?</span>
+            <Link href="/login" className="font-medium text-primary hover:underline">Sign in</Link>
+          </>
+        }
+      >
+        <Alert className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
+          <CheckCircle2 />
+          <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+            Confirmation email sent. You can close this tab.
+          </AlertDescription>
+        </Alert>
+      </AuthCard>
     )
   }
 
   return (
-    <div className="w-full max-w-sm bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm">
-      <p className="text-xs font-semibold tracking-widest uppercase text-emerald-700 mb-2">
-        Get started
-      </p>
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Create account</h1>
-      <p className="text-sm text-zinc-500 mb-7">Sign up for free. No credit card required.</p>
-
+    <AuthCard
+      eyebrow="Get started"
+      title="Create account"
+      description="Sign up for free. No credit card required."
+      footer={
+        <>
+          <span>Already have an account?</span>
+          <Link href="/login" className="font-medium text-primary hover:underline">Sign in</Link>
+        </>
+      }
+    >
       {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2.5 mb-5">
-          <span className="mt-px">⚠</span>
-          <span>{error}</span>
-        </div>
+        <Alert variant="destructive" className="mb-5">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
-          <label htmlFor="email" className="block text-sm font-medium text-zinc-700">Email</label>
-          <input
+          <Label htmlFor="email">Email</Label>
+          <Input
             id="email"
             type="email"
             autoComplete="email"
@@ -94,13 +104,12 @@ export default function SignUpPage() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="password" className="block text-sm font-medium text-zinc-700">Password</label>
-          <input
+          <Label htmlFor="password">Password</Label>
+          <Input
             id="password"
             type="password"
             autoComplete="new-password"
@@ -109,13 +118,12 @@ export default function SignUpPage() {
             placeholder="At least 8 characters"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="confirm" className="block text-sm font-medium text-zinc-700">Confirm password</label>
-          <input
+          <Label htmlFor="confirm">Confirm password</Label>
+          <Input
             id="confirm"
             type="password"
             autoComplete="new-password"
@@ -123,23 +131,14 @@ export default function SignUpPage() {
             placeholder="Repeat your password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed"
-        >
+        <Button type="submit" size="lg" disabled={loading} className="mt-2 w-full">
+          {loading && <Loader2 className="animate-spin" />}
           {loading ? 'Creating account…' : 'Create account'}
-        </button>
+        </Button>
       </form>
-
-      <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center gap-1 text-sm text-zinc-500">
-        <span>Already have an account?</span>
-        <Link href="/login" className="text-emerald-700 font-medium hover:underline">Sign in</Link>
-      </div>
-    </div>
+    </AuthCard>
   )
 }

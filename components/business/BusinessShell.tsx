@@ -1,135 +1,227 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import type { Business } from '@/lib/types/marketplace'
 import SignOutButton from '@/components/auth/SignOutButton'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { SidebarNavLink, type NavColor } from '@/components/dashboard/sidebar-nav'
+import {
+  LayoutDashboard,
+  CreditCard,
+  Package,
+  Tag,
+  Soup,
+  Receipt,
+  ScrollText,
+  LineChart,
+  Settings,
+  KeyRound,
+  LogOut,
+  Menu,
+  PackageSearch,
+  ArrowUpRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react'
 
-const navSections = [
+const navSections: { section: string; items: { href: string; label: string; icon: typeof LayoutDashboard; color: NavColor }[] }[] = [
   {
     section: 'Main',
     items: [
-      { href: '/sell', label: 'Overview', icon: '🏠' },
-      { href: '/sell/pos', label: 'POS', icon: '💳' },
+      { href: '/sell', label: 'Overview', icon: LayoutDashboard, color: 'emerald' },
+      { href: '/sell/pos', label: 'POS', icon: CreditCard, color: 'sky' },
     ],
   },
   {
     section: 'Catalog',
     items: [
-      { href: '/sell/products', label: 'Products', icon: '📦' },
-      { href: '/sell/categories', label: 'Categories', icon: '🏷️' },
-      { href: '/sell/ingredients', label: 'Ingredients', icon: '🥘' },
+      { href: '/sell/products', label: 'Products', icon: Package, color: 'violet' },
+      { href: '/sell/categories', label: 'Categories', icon: Tag, color: 'amber' },
+      { href: '/sell/ingredients', label: 'Ingredients', icon: Soup, color: 'rose' },
     ],
   },
   {
     section: 'Sales',
     items: [
-      { href: '/sell/orders', label: 'Online Orders', icon: '🧾' },
-      { href: '/sell/sales-history', label: 'POS Sales History', icon: '📜' },
-      { href: '/sell/analytics', label: 'Analytics', icon: '📈' },
+      { href: '/sell/orders', label: 'Online Orders', icon: Receipt, color: 'indigo' },
+      { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
+      { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
     ],
   },
 ]
 
+const COLLAPSE_KEY = 'iposa.sell.sidebar.collapsed'
+
 export default function BusinessShell({ business, children }: { business: Business; children: React.ReactNode }) {
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const isActive = (href: string) => (href === '/sell' ? pathname === '/sell' : pathname.startsWith(href))
+  // The mobile drawer must always show the full nav regardless of the
+  // desktop collapse preference — it's only ever open on mobile, where the
+  // `md:w-16`/`md:hidden` CSS below never applies anyway, but SidebarNavLink
+  // branches in JS (not pure CSS) on its `collapsed` prop, so that has to be
+  // forced false while the drawer is open.
+  const effectiveCollapsed = collapsed && !sidebarOpen
+
+  // Read the saved preference after mount only, so the server-rendered
+  // markup (which has no access to localStorage) matches the client's first
+  // render and avoids a hydration mismatch — same pattern as the cart.
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === '1')
+    } catch {
+      // storage unavailable — default to expanded
+    }
+  }, [])
+
+  function toggleCollapsed() {
+    setCollapsed(prev => {
+      const next = !prev
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0')
+      } catch {
+        // storage unavailable — preference just won't persist
+      }
+      return next
+    })
+  }
 
   return (
-    <div className="h-screen flex flex-col md:flex-row bg-zinc-50 overflow-hidden">
-      {/* Mobile-only top bar. Sits in normal document flow (not floating),
-          so it never overlaps page content the way a fixed button would. */}
-      <header className="md:hidden shrink-0 h-14 flex items-center gap-3 px-4 border-b border-zinc-200 bg-white">
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          aria-label="Toggle menu"
-          className="p-1.5 -ml-1.5 rounded-lg hover:bg-zinc-100 transition cursor-pointer"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-        <span className="text-sm font-semibold text-zinc-900 truncate">{business.name}</span>
+    <div className="flex h-screen flex-col overflow-hidden bg-muted/40 md:flex-row">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-card px-4 md:hidden">
+        <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle menu">
+          <Menu />
+        </Button>
+        <span className="truncate text-sm font-semibold text-foreground">{business.name}</span>
       </header>
 
       {sidebarOpen && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/50 z-30"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      <aside className={`
-        fixed md:static inset-y-0 left-0 z-40 w-60 shrink-0 bg-white border-r border-zinc-200 flex flex-col
-        transition-transform duration-300 ease-in-out
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-      `}>
-        <div className="h-14 flex items-center px-5 border-b border-zinc-100">
-          <Link href="/" className="text-sm font-semibold text-zinc-900 tracking-tight hover:text-blue-600 transition">
-            IPOSA <span className="text-zinc-400 font-normal">Seller</span>
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out md:static ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        } ${collapsed ? 'md:w-16' : 'md:w-64'}`}
+      >
+        <div className={`flex h-14 items-center border-b ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
+          <Link href="/" className={`flex items-center gap-2 ${collapsed ? 'md:hidden' : ''}`}>
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
+              <PackageSearch className="size-4" />
+            </span>
+            <span className="font-serif text-base leading-none tracking-tight text-foreground transition-colors hover:text-primary">
+              Iposa <span className="font-sans text-sm font-normal text-muted-foreground">Seller</span>
+            </span>
+          </Link>
+          {collapsed && (
+            <span className="hidden size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary md:flex">
+              <PackageSearch className="size-4" />
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="hidden shrink-0 md:inline-flex"
+          >
+            {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+          </Button>
+        </div>
+
+        <div className={`px-4 pb-2 pt-4 ${collapsed ? 'md:hidden' : ''}`}>
+          <p className="truncate text-sm font-bold text-foreground">{business.name}</p>
+          <Link href={`/shop/${business.slug}`} className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline">
+            View my shop <ArrowUpRight className="size-3" />
           </Link>
         </div>
-        <div className="px-4 pt-4 pb-2">
-          <p className="text-sm font-bold text-zinc-900 truncate">{business.name}</p>
-          <Link href={`/shop/${business.slug}`} className="text-[11px] text-blue-600 hover:underline">
-            View my shop →
-          </Link>
-        </div>
-        <nav className="flex flex-col gap-0.5 p-3 flex-1 overflow-y-auto">
+
+        <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
           {navSections.map(section => (
             <div key={section.section}>
-              <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider px-2 pt-3 pb-2">
+              <p className={`label-mono px-2 pb-2 pt-3 ${collapsed ? 'md:hidden' : ''}`}>
                 {section.section}
               </p>
               <div className="flex flex-col gap-0.5">
                 {section.items.map(item => (
-                  <Link
+                  <SidebarNavLink
                     key={item.href}
                     href={item.href}
+                    label={item.label}
+                    icon={item.icon}
+                    color={item.color}
+                    active={isActive(item.href)}
+                    collapsed={effectiveCollapsed}
                     onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-2.5 text-sm rounded-lg px-3 py-2 transition-all duration-200 ${
-                      isActive(item.href)
-                        ? 'bg-blue-50 text-blue-600 font-medium'
-                        : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
-                    }`}
-                  >
-                    <span className="text-base">{item.icon}</span>
-                    <span>{item.label}</span>
-                  </Link>
+                  />
                 ))}
               </div>
             </div>
           ))}
         </nav>
-        <div className="p-3 border-t border-zinc-100 space-y-0.5">
-          <Link
+
+        <div className="space-y-0.5 border-t p-3">
+          <SidebarNavLink
             href="/sell/settings"
+            label="Settings"
+            icon={Settings}
+            color="slate"
+            active={isActive('/sell/settings')}
+            collapsed={effectiveCollapsed}
             onClick={() => setSidebarOpen(false)}
-            className={`flex items-center gap-2.5 text-sm rounded-lg px-3 py-2 transition-all duration-200 ${
-              isActive('/sell/settings')
-                ? 'bg-blue-50 text-blue-600 font-medium'
-                : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
-            }`}
-          >
-            <span className="text-base">⚙️</span> Settings
-          </Link>
-          <Link
-            href="/account/update-password"
-            onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-2.5 text-sm text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg px-3 py-2 transition-all duration-200"
-          >
-            <span className="text-base">🔑</span> Password
-          </Link>
-          <SignOutButton
-            icon={<span className="text-base">🚪</span>}
-            className="w-full flex items-center gap-2.5 text-sm text-zinc-600 hover:text-red-600 hover:bg-red-50 rounded-lg px-3 py-2 transition cursor-pointer disabled:opacity-50"
           />
+          {effectiveCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    href="/account/update-password"
+                    onClick={() => setSidebarOpen(false)}
+                    className="flex items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  />
+                }
+              >
+                <KeyRound className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent side="right">Password</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Link
+              href="/account/update-password"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <KeyRound className="size-4" /> Password
+            </Link>
+          )}
+          {effectiveCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <SignOutButton
+                    icon={<LogOut className="size-4" />}
+                    hideLabel
+                    className="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                  />
+                }
+              />
+              <TooltipContent side="right">Sign out</TooltipContent>
+            </Tooltip>
+          ) : (
+            <SignOutButton
+              icon={<LogOut className="size-4" />}
+              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+            />
+          )}
         </div>
       </aside>
 
-      <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   )
 }

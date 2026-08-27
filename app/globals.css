@@ -1,26 +1,248 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-heading);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/*
+ * Brand: "Iposa" system — a warm off-white/near-ink neutral base carrying a
+ * vivid indigo→magenta brand gradient, with teal, amber and sky as
+ * complementary accents (reused for badges, nav icon chips and charts so
+ * the same hue always means the same thing). Instrument Serif keeps display
+ * headings distinctive and premium; DM Sans carries body/UI text; IBM Plex
+ * Mono is reserved for uppercase micro-labels, prices and metadata.
+ */
+:root {
+  --font-sans: var(--font-dm-sans), "DM Sans", system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), "Instrument Serif", Georgia, serif;
+  --font-mono: var(--font-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
+  --font-heading: var(--font-serif);
+
+  --background: #fbfbfd;
+  --foreground: #14121f;
+  --card: #ffffff;
+  --card-foreground: #14121f;
+  --popover: #ffffff;
+  --popover-foreground: #14121f;
+  --primary: #6d4aff;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f1f8;
+  --secondary-foreground: #14121f;
+  --muted: #f2f1f8;
+  --muted-foreground: #6b6a7d;
+  --accent: #efe9ff;
+  --accent-foreground: #4c2fd6;
+  --destructive: #e11d48;
+  --border: #eae8f2;
+  --input: #dfddec;
+  --ring: #6d4aff;
+  --chart-1: #6d4aff;
+  --chart-2: #f59e0b;
+  --chart-3: #0d9488;
+  --chart-4: #ec4899;
+  --chart-5: #0ea5e9;
+  --radius: 0.625rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #14121f;
+  --sidebar-primary: #6d4aff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #efe9ff;
+  --sidebar-accent-foreground: #4c2fd6;
+  --sidebar-border: #eae8f2;
+  --sidebar-ring: #6d4aff;
+
+  /* Brand accents, kept as raw hues (not remapped by shadcn's semantic
+     tokens above) for gradients, decorative blobs and glow shadows. */
+  --brand-violet: #6d4aff;
+  --brand-pink: #ec4899;
+  --brand-amber: #f59e0b;
+  --brand-teal: #0d9488;
+  --brand-sky: #0ea5e9;
+
+  --gradient-brand: linear-gradient(135deg, var(--brand-violet) 0%, #9457ff 45%, var(--brand-pink) 100%);
+  --gradient-brand-soft: linear-gradient(135deg, color-mix(in oklch, var(--brand-violet), transparent 88%) 0%, color-mix(in oklch, var(--brand-pink), transparent 90%) 100%);
+  --gradient-hero: radial-gradient(60% 55% at 12% 8%, color-mix(in oklch, var(--brand-violet), transparent 88%) 0%, transparent 60%), radial-gradient(50% 50% at 92% 0%, color-mix(in oklch, var(--brand-amber), transparent 90%) 0%, transparent 60%), radial-gradient(45% 55% at 100% 95%, color-mix(in oklch, var(--brand-pink), transparent 90%) 0%, transparent 60%);
+  --shadow-glow-primary: 0 12px 32px -10px color-mix(in oklch, var(--primary), transparent 55%);
+  --shadow-card: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 96%), 0 12px 28px -18px color-mix(in oklch, var(--foreground), transparent 82%);
+  --shadow-card-hover: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 95%), 0 20px 40px -18px color-mix(in oklch, var(--foreground), transparent 75%);
+}
+
+.dark {
+  --background: #0c0b14;
+  --foreground: #f5f4fa;
+  --card: #14121f;
+  --card-foreground: #f5f4fa;
+  --popover: #14121f;
+  --popover-foreground: #f5f4fa;
+  --primary: #9c85ff;
+  --primary-foreground: #100a29;
+  --secondary: #1e1c2b;
+  --secondary-foreground: #f5f4fa;
+  --muted: #1e1c2b;
+  --muted-foreground: #a4a2b8;
+  --accent: #241f42;
+  --accent-foreground: #d6c9ff;
+  --destructive: #fb7185;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #9c85ff;
+  --chart-1: #9c85ff;
+  --chart-2: #fbbf24;
+  --chart-3: #2dd4bf;
+  --chart-4: #f472b6;
+  --chart-5: #38bdf8;
+  --sidebar: #14121f;
+  --sidebar-foreground: #f5f4fa;
+  --sidebar-primary: #9c85ff;
+  --sidebar-primary-foreground: #100a29;
+  --sidebar-accent: #241f42;
+  --sidebar-accent-foreground: #d6c9ff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #9c85ff;
+
+  --brand-violet: #9c85ff;
+  --brand-pink: #f472b6;
+  --brand-amber: #fbbf24;
+  --brand-teal: #2dd4bf;
+  --brand-sky: #38bdf8;
+
+  --gradient-brand: linear-gradient(135deg, var(--brand-violet) 0%, #b48bff 45%, var(--brand-pink) 100%);
+  --gradient-brand-soft: linear-gradient(135deg, color-mix(in oklch, var(--brand-violet), transparent 82%) 0%, color-mix(in oklch, var(--brand-pink), transparent 86%) 100%);
+  --gradient-hero: radial-gradient(60% 55% at 12% 8%, color-mix(in oklch, var(--brand-violet), transparent 84%) 0%, transparent 60%), radial-gradient(50% 50% at 92% 0%, color-mix(in oklch, var(--brand-amber), transparent 88%) 0%, transparent 60%), radial-gradient(45% 55% at 100% 95%, color-mix(in oklch, var(--brand-pink), transparent 86%) 0%, transparent 60%);
+  --shadow-glow-primary: 0 12px 32px -8px color-mix(in oklch, var(--primary), transparent 45%);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 28px -18px rgba(0, 0, 0, 0.6);
+  --shadow-card-hover: 0 1px 2px rgba(0, 0, 0, 0.35), 0 20px 40px -18px rgba(0, 0, 0, 0.7);
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  /* Uppercase mono micro-label, used for section eyebrows, stat labels,
+     table headers and metadata throughout the design system. */
+  .label-mono {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  /* Vivid indigo→pink brand gradient — primary CTAs, hero accents, banners. */
+  .bg-gradient-brand {
+    background-image: var(--gradient-brand);
+  }
+
+  /* Faint wash of the same gradient, for large surfaces (cards, panels)
+     that need color without competing with foreground content. */
+  .bg-gradient-brand-soft {
+    background-image: var(--gradient-brand-soft);
+  }
+
+  /* Multi-color blurred wash for hero/CTA section backgrounds — pair with
+     `relative overflow-hidden` on the section and `isolate` on inner content. */
+  .bg-hero-wash {
+    background-image: var(--gradient-hero);
+  }
+
+  .text-gradient-brand {
+    background-image: var(--gradient-brand);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  .shadow-glow-primary {
+    box-shadow: var(--shadow-glow-primary);
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-card-hover {
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* Opt-in lift for genuinely clickable cards (product tiles, shop tiles) —
+     not applied to Card by default since most cards are static containers
+     (forms, stat panels, table wrappers) where a hover lift would wrongly
+     imply clickability. */
+  .card-interactive {
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease,
+      border-color 200ms ease;
+  }
+  .card-interactive:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in oklch, var(--primary), transparent 55%);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* Subtle dot-grid texture for hero/section backgrounds. */
+  .bg-dot-grid {
+    background-image: radial-gradient(color-mix(in oklch, var(--foreground), transparent 88%) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
 }

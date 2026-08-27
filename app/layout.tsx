@@ -1,28 +1,41 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Sans, Instrument_Serif, IBM_Plex_Mono } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-instrument-serif",
   subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const ibmPlexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Inventory System - Manage Your Business",
-  description: "A comprehensive inventory management system with POS, analytics, and real-time tracking",
-  keywords: "inventory, POS, analytics, business management",
-  authors: [{ name: "Your Company" }],
+  title: "Iposa — Sell, Manage, and Grow Your Business",
+  description: "The all-in-one platform for local shops: point of sale, inventory, an online storefront, and an affiliate program in one place.",
+  keywords: "iposa, marketplace, POS, inventory, online store, affiliate program",
+  authors: [{ name: "Iposa" }],
   openGraph: {
     type: "website",
     locale: "en_US",
     url: "/",
-    title: "Inventory System",
-    description: "Manage your business inventory with ease",
+    title: "Iposa",
+    description: "Sell in person and online, all from one dashboard.",
   }
 };
 
@@ -40,7 +53,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${instrumentSerif.variable} ${ibmPlexMono.variable} h-full antialiased`}
     >
       <head>
         <meta charSet="utf-8" />
@@ -48,7 +61,12 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <TooltipProvider delay={200}>
+          {children}
+          <Toaster richColors position="top-center" />
+        </TooltipProvider>
+      </body>
     </html>
   );
 }

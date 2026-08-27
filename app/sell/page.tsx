@@ -1,5 +1,18 @@
 import Link from 'next/link'
 import { requireBusinessAccount, createClient } from '@/lib/supabase/server'
+import { Card, CardContent } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import {
+  AlertCircle,
+  Clock,
+  XCircle,
+  Package,
+  Receipt,
+  AlertTriangle,
+  TrendingUp,
+  PartyPopper,
+} from 'lucide-react'
 
 export const revalidate = 0
 
@@ -12,11 +25,13 @@ export default async function SellDashboardPage() {
 
   if (business.status === 'pending') {
     return (
-      <div className="max-w-xl mx-auto px-6 py-16 text-center">
-        <p className="text-4xl mb-3">⏳</p>
-        <h1 className="text-xl font-bold text-zinc-900">Your application is under review</h1>
-        <p className="text-sm text-zinc-500 mt-2">
-          <span className="font-semibold text-zinc-700">{business.name}</span> is waiting for approval
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-3 px-6 py-16 text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-950">
+          <Clock className="size-6 text-amber-600 dark:text-amber-400" />
+        </div>
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Your application is under review</h1>
+        <p className="text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">{business.name}</span> is waiting for approval
           from the marketplace team. You&apos;ll be able to manage products and orders once it&apos;s approved.
         </p>
       </div>
@@ -25,16 +40,18 @@ export default async function SellDashboardPage() {
 
   if (business.status === 'rejected') {
     return (
-      <div className="max-w-xl mx-auto px-6 py-16 text-center">
-        <p className="text-4xl mb-3">✕</p>
-        <h1 className="text-xl font-bold text-zinc-900">Application not approved</h1>
-        <p className="text-sm text-zinc-500 mt-2">
-          <span className="font-semibold text-zinc-700">{business.name}</span> was not approved.
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-3 px-6 py-16 text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-red-100 dark:bg-red-950">
+          <XCircle className="size-6 text-red-600 dark:text-red-400" />
+        </div>
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Application not approved</h1>
+        <p className="text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">{business.name}</span> was not approved.
         </p>
         {business.rejection_reason && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3 mt-4 inline-block">
-            {business.rejection_reason}
-          </p>
+          <Alert variant="destructive" className="mt-2 w-fit">
+            <AlertDescription>{business.rejection_reason}</AlertDescription>
+          </Alert>
         )}
       </div>
     )
@@ -79,9 +96,12 @@ export default async function SellDashboardPage() {
 
   if (salesErr || stockErr || itemsErr) {
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 rounded-lg m-6">
-        Failed to calculate business metrics: {salesErr?.message ?? stockErr?.message ?? itemsErr?.message}
-      </div>
+      <Alert variant="destructive" className="m-6">
+        <AlertCircle />
+        <AlertDescription>
+          Failed to calculate business metrics: {salesErr?.message ?? stockErr?.message ?? itemsErr?.message}
+        </AlertDescription>
+      </Alert>
     )
   }
 
@@ -103,100 +123,132 @@ export default async function SellDashboardPage() {
   const sortedTopProducts = Object.values(dynamicSalesMap).sort((a, b) => b.qty - a.qty).slice(0, 5)
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1600px] mx-auto space-y-6">
+    <div className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-zinc-900">Welcome back, {business.name}</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">Here&apos;s how your business is doing.</p>
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Welcome back, {business.name}</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">Here&apos;s how your business is doing.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">POS Revenue Today</span>
-          <h3 className="text-2xl font-mono font-bold text-zinc-900 mt-2">
-            ₱{totalRevenueToday.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </h3>
-          <p className="text-[11px] text-zinc-400 mt-1">{totalTransactionsToday} transactions since midnight</p>
-        </div>
-        <Link href="/sell/products" className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm hover:border-blue-300 transition">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Products listed</span>
-          <h3 className="text-2xl font-bold text-zinc-900 mt-2">{productCount ?? 0}</h3>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardContent className="flex items-start justify-between">
+            <div>
+              <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">POS Revenue Today</span>
+              <h3 className="mt-2 font-mono text-2xl font-bold text-foreground">
+                ₱{totalRevenueToday.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h3>
+              <p className="mt-1 text-[11px] text-muted-foreground">{totalTransactionsToday} transactions since midnight</p>
+            </div>
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <TrendingUp className="size-4 text-primary" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Link href="/sell/products">
+          <Card className="transition-colors hover:border-primary/40">
+            <CardContent className="flex items-start justify-between">
+              <div>
+                <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Products listed</span>
+                <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{productCount ?? 0}</h3>
+              </div>
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10">
+                <Package className="size-4 text-sky-600" />
+              </div>
+            </CardContent>
+          </Card>
         </Link>
-        <Link href="/sell/orders" className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm hover:border-blue-300 transition">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Online orders awaiting action</span>
-          <h3 className="text-2xl font-bold text-zinc-900 mt-2">{pendingOrderCount ?? 0}</h3>
+
+        <Link href="/sell/orders">
+          <Card className="transition-colors hover:border-primary/40">
+            <CardContent className="flex items-start justify-between">
+              <div>
+                <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Online orders awaiting action</span>
+                <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{pendingOrderCount ?? 0}</h3>
+              </div>
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10">
+                <Receipt className="size-4 text-violet-600" />
+              </div>
+            </CardContent>
+          </Card>
         </Link>
-        <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Low stock items</span>
-          <h3 className="text-2xl font-bold text-zinc-900 mt-2">{lowStockProducts?.length ?? 0}</h3>
-        </div>
+
+        <Card>
+          <CardContent className="flex items-start justify-between">
+            <div>
+              <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Low stock items</span>
+              <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{lowStockProducts?.length ?? 0}</h3>
+            </div>
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
+              <AlertTriangle className="size-4 text-amber-600" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm flex flex-col">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Card className="flex flex-col p-4">
           <div className="mb-3">
-            <h4 className="text-sm font-semibold text-zinc-900">Top Moving Stock (POS)</h4>
-            <p className="text-[11px] text-zinc-400">Most frequent in-store products by units sold.</p>
+            <h4 className="text-sm font-semibold text-foreground">Top Moving Stock (POS)</h4>
+            <p className="text-[11px] text-muted-foreground">Most frequent in-store products by units sold.</p>
           </div>
           <div className="flex-1 overflow-x-auto">
             {sortedTopProducts.length === 0 ? (
-              <div className="text-center py-12 text-xs text-zinc-400 border border-dashed border-zinc-200 rounded-lg">
+              <div className="rounded-lg border border-dashed py-12 text-center text-xs text-muted-foreground">
                 No POS sales recorded yet.
               </div>
             ) : (
-              <table className="w-full text-left border-collapse">
+              <table className="w-full border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-zinc-100 text-[11px] font-semibold text-zinc-400 bg-zinc-50">
-                    <th className="p-2 rounded-l-md">Product</th>
+                  <tr className="label-mono border-b bg-gradient-brand-soft">
+                    <th className="rounded-l-md p-2">Product</th>
                     <th className="p-2">SKU</th>
-                    <th className="p-2 text-right rounded-r-md">Units Sold</th>
+                    <th className="rounded-r-md p-2 text-right">Units Sold</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-50 text-xs">
+                <tbody className="divide-y text-xs">
                   {sortedTopProducts.map((p, index) => (
-                    <tr key={index} className="hover:bg-zinc-50/50 transition">
-                      <td className="p-2.5 font-medium text-zinc-800 max-w-[220px] truncate">{p.name}</td>
-                      <td className="p-2.5 font-mono text-zinc-400">{p.sku}</td>
-                      <td className="p-2.5 text-right font-semibold font-mono text-emerald-600">{p.qty}x</td>
+                    <tr key={index} className="transition-colors hover:bg-muted/50">
+                      <td className="max-w-[220px] truncate p-2.5 font-medium text-foreground">{p.name}</td>
+                      <td className="p-2.5 font-mono text-muted-foreground">{p.sku}</td>
+                      <td className="p-2.5 text-right font-mono font-semibold text-primary">{p.qty}x</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
           </div>
-        </div>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm flex flex-col">
+        <Card className="flex flex-col p-4">
           <div className="mb-3">
-            <h4 className="text-sm font-semibold text-zinc-900">Low Stock Alerts</h4>
-            <p className="text-[11px] text-zinc-400">Standalone products under 10 units remaining.</p>
+            <h4 className="text-sm font-semibold text-foreground">Low Stock Alerts</h4>
+            <p className="text-[11px] text-muted-foreground">Standalone products under 10 units remaining.</p>
           </div>
           <div className="flex-1 overflow-x-auto">
             {(lowStockProducts ?? []).length === 0 ? (
-              <div className="text-center py-12 text-xs text-emerald-600 font-medium bg-emerald-50 border border-emerald-100 rounded-lg">
-                🎉 All products are fully stocked above the threshold.
+              <div className="flex flex-col items-center gap-1.5 rounded-lg bg-emerald-50 py-12 text-center text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                <PartyPopper className="size-5" />
+                All products are fully stocked above the threshold.
               </div>
             ) : (
-              <table className="w-full text-left border-collapse">
+              <table className="w-full border-collapse text-left">
                 <thead>
-                  <tr className="border-b border-zinc-100 text-[11px] font-semibold text-zinc-400 bg-zinc-50">
-                    <th className="p-2 rounded-l-md">Product</th>
+                  <tr className="label-mono border-b bg-gradient-brand-soft">
+                    <th className="rounded-l-md p-2">Product</th>
                     <th className="p-2">SKU</th>
-                    <th className="p-2 text-right rounded-r-md">Stock</th>
+                    <th className="rounded-r-md p-2 text-right">Stock</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-50 text-xs">
+                <tbody className="divide-y text-xs">
                   {(lowStockProducts ?? []).map(p => (
-                    <tr key={p.id} className="hover:bg-zinc-50/50 transition">
-                      <td className="p-2.5 font-medium text-zinc-800 max-w-[220px] truncate">{p.name}</td>
-                      <td className="p-2.5 font-mono text-zinc-400">{p.sku ?? 'N/A'}</td>
+                    <tr key={p.id} className="transition-colors hover:bg-muted/50">
+                      <td className="max-w-[220px] truncate p-2.5 font-medium text-foreground">{p.name}</td>
+                      <td className="p-2.5 font-mono text-muted-foreground">{p.sku ?? 'N/A'}</td>
                       <td className="p-2.5 text-right font-semibold">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] ${
-                          p.stock === 0
-                            ? 'bg-red-50 text-red-600 border border-red-100'
-                            : 'bg-amber-50 text-amber-600 border border-amber-100'
-                        }`}>
+                        <Badge variant={p.stock === 0 ? 'destructive' : 'outline'} className={p.stock !== 0 ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400' : ''}>
                           {p.stock === 0 ? 'Out of Stock' : `${p.stock} units remaining`}
-                        </span>
+                        </Badge>
                       </td>
                     </tr>
                   ))}
@@ -204,7 +256,7 @@ export default async function SellDashboardPage() {
               </table>
             )}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   )

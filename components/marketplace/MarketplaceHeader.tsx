@@ -1,9 +1,26 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
 import { useCart } from '@/lib/marketplace/cart-context'
 import SignOutButton from '@/components/auth/SignOutButton'
+import { Button } from '@/components/ui/button'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Menu, ShoppingCart, Store, ShieldCheck, Link2, PackageSearch, LogIn } from 'lucide-react'
 import type { UserRole } from '@/lib/supabase/server'
 
 type Props = {
@@ -13,99 +30,142 @@ type Props = {
 
 export default function MarketplaceHeader({ userEmail, role }: Props) {
   const { totalItems } = useCart()
-  const [menuOpen, setMenuOpen] = useState(false)
+
+  const roleLink =
+    role === 'business_admin'
+      ? { href: '/sell', label: 'My Store', icon: Store }
+      : role === 'affiliate'
+        ? { href: '/affiliate', label: 'My Affiliate Dashboard', icon: Link2 }
+        : role === 'super_admin'
+          ? { href: '/admin/businesses', label: 'Admin', icon: ShieldCheck }
+          : null
+
+  const navLinkClass =
+    'relative text-sm font-medium text-muted-foreground transition-colors hover:text-foreground after:absolute after:-bottom-1 after:left-0 after:h-0.5 after:w-0 after:rounded-full after:bg-gradient-brand after:transition-all after:duration-200 hover:after:w-full'
 
   const navLinks = (
     <>
-      <Link href="/" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Browse</Link>
+      <Link href="/" className={navLinkClass}>
+        Browse
+      </Link>
       {userEmail && (
-        <Link href="/orders" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">My Orders</Link>
+        <Link href="/orders" className={navLinkClass}>
+          My Orders
+        </Link>
       )}
-      {role === 'business_admin' && (
-        <Link href="/sell" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">My Store</Link>
-      )}
-      {role === 'affiliate' && (
-        <Link href="/affiliate" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">My Affiliate Dashboard</Link>
-      )}
-      {role === 'super_admin' && (
-        <Link href="/admin/businesses" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Admin</Link>
+      {roleLink && (
+        <Link href={roleLink.href} className={navLinkClass}>
+          {roleLink.label}
+        </Link>
       )}
       {(role === null || role === 'customer') && (
-        <Link href="/register-business" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Sell on Iposa</Link>
-      )}
-      {(role === null || role === 'customer') && (
-        <Link href="/become-affiliate" onClick={() => setMenuOpen(false)} className="hover:text-zinc-900 transition">Become an Affiliate</Link>
+        <>
+          <Link href="/register-business" className={navLinkClass}>
+            Sell on Iposa
+          </Link>
+          <Link href="/become-affiliate" className={navLinkClass}>
+            Become an Affiliate
+          </Link>
+        </>
       )}
     </>
   )
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-zinc-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => setMenuOpen(o => !o)}
-            aria-label="Toggle menu"
-            aria-expanded={menuOpen}
-            className="sm:hidden p-1.5 -ml-1.5 rounded-lg hover:bg-zinc-100 transition cursor-pointer"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              {menuOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md supports-backdrop-filter:bg-background/60">
+      <div className="mx-auto flex h-[66px] max-w-310 items-center justify-between gap-4 px-4 sm:px-7">
+        <div className="flex shrink-0 items-center gap-1">
+          <Sheet>
+            <SheetTrigger
+              render={
+                <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Toggle menu" />
+              }
+            >
+              <Menu />
+            </SheetTrigger>
+            <SheetContent side="left">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2 font-serif text-lg">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary">
+                    <PackageSearch className="size-4" />
+                  </span>
+                  Iposa
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="flex flex-col gap-4 px-4 pb-4 text-sm">{navLinks}</nav>
+              {userEmail && (
+                <div className="border-t px-4 pb-4 pt-3">
+                  <SignOutButton redirectTo="/" className="text-sm font-medium text-destructive" />
+                </div>
               )}
-            </svg>
-          </button>
-          <Link href="/" className="text-lg font-bold text-zinc-900 tracking-tight">
-            IPOSA <span className="text-blue-600 hidden sm:inline">Marketplace</span>
+            </SheetContent>
+          </Sheet>
+
+          <Link href="/" className="group flex items-center gap-2">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary transition-transform group-hover:scale-105">
+              <PackageSearch className="size-4.5" />
+            </span>
+            <span className="font-serif text-[25px] leading-none tracking-tight text-foreground">
+              Iposa<span className="hidden italic text-gradient-brand sm:inline"> Marketplace</span>
+            </span>
           </Link>
         </div>
 
-        <nav className="hidden sm:flex items-center gap-5 text-sm font-medium text-zinc-600">
-          {navLinks}
-        </nav>
+        <nav className="hidden items-center gap-6 sm:flex">{navLinks}</nav>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <Link
-            href="/cart"
-            className="relative flex items-center gap-1.5 text-sm font-semibold text-zinc-700 hover:text-zinc-900 border border-zinc-200 rounded-lg px-3 py-1.5 transition"
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            className="relative"
+            render={<Link href="/cart" />}
           >
-            🛒 Cart
+            <ShoppingCart />
+            <span className="hidden sm:inline">Cart</span>
             {totalItems > 0 && (
-              <span className="absolute -top-2 -right-2 bg-blue-600 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
                 {totalItems > 99 ? '99+' : totalItems}
               </span>
             )}
-          </Link>
+          </Button>
 
           {userEmail ? (
-            <SignOutButton
-              redirectTo="/"
-              className="hidden sm:inline text-xs font-semibold text-zinc-500 hover:text-zinc-900 transition cursor-pointer disabled:opacity-50"
-            />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button variant="ghost" size="icon" className="rounded-full" aria-label="Account menu" />}
+              >
+                <Avatar size="sm">
+                  <AvatarFallback className="bg-primary/10 text-primary">
+                    {userEmail.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="max-w-48 truncate font-normal text-foreground">{userEmail}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {roleLink && (
+                  <DropdownMenuItem render={<Link href={roleLink.href} />}>
+                    <roleLink.icon /> {roleLink.label}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem render={<Link href="/orders" />}>
+                  <PackageSearch /> My Orders
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <div className="px-1.5 py-1">
+                  <SignOutButton
+                    redirectTo="/"
+                    className="flex w-full items-center gap-1.5 rounded-md text-sm text-destructive hover:underline disabled:opacity-50"
+                  />
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : (
-            <Link
-              href="/login"
-              className="bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition"
-            >
-              Sign in
-            </Link>
+            <Button render={<Link href="/login" />}>
+              <LogIn /> Sign in
+            </Button>
           )}
         </div>
       </div>
-
-      {menuOpen && (
-        <nav className="sm:hidden border-t border-zinc-100 px-4 py-3 flex flex-col gap-3 text-sm font-medium text-zinc-600 bg-white">
-          {navLinks}
-          {userEmail && (
-            <SignOutButton
-              redirectTo="/"
-              className="text-left text-red-600 hover:text-red-700 transition cursor-pointer disabled:opacity-50"
-            />
-          )}
-        </nav>
-      )}
     </header>
   )
 }

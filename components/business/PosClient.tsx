@@ -2,6 +2,12 @@
 
 import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CheckCircle2, AlertCircle, Search, ShoppingCart, Minus, Plus, X } from 'lucide-react'
 
 type Product = {
   id: number
@@ -173,48 +179,56 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
   }
 
   return (
-    <div className="flex flex-col lg:flex-row h-full lg:max-w-[1600px] lg:mx-auto lg:overflow-hidden bg-zinc-50">
+    <div className="flex h-full flex-col bg-muted/30 lg:mx-auto lg:max-w-[1600px] lg:flex-row lg:overflow-hidden">
 
-      <div className="lg:w-7/12 flex flex-col p-4 sm:p-5 lg:h-full lg:overflow-hidden border-b lg:border-b-0 lg:border-r border-zinc-200">
+      <div className="flex flex-col border-b p-4 sm:p-5 lg:h-full lg:overflow-hidden lg:border-b-0 lg:border-r lg:w-7/12">
 
         {successMessage && (
-          <div className="mb-4 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
-            {successMessage}
-          </div>
+          <Alert className="mb-4 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
+            <CheckCircle2 />
+            <AlertDescription className="text-emerald-700 dark:text-emerald-400">{successMessage}</AlertDescription>
+          </Alert>
         )}
         {errorMessage && (
-          <div className="mb-4 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
-            {errorMessage}
-          </div>
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle />
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
-          <input
-            type="text"
-            placeholder="Scan SKU or type product name…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="flex-1 bg-white border border-zinc-200 rounded-lg px-3.5 py-2 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-          />
-          <select
-            value={filterCat}
-            onChange={e => setFilterCat(e.target.value)}
-            className="bg-white border border-zinc-200 rounded-lg px-3.5 py-2 text-sm text-zinc-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition cursor-pointer"
-          >
-            <option value="">All Categories</option>
-            {categories.map(c => (
-              <option key={c.id} value={String(c.id)}>{c.name}</option>
-            ))}
-          </select>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Scan SKU or type product name…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="bg-background pl-8"
+            />
+          </div>
+          <Select value={filterCat || '__all__'} onValueChange={v => setFilterCat(!v || v === '__all__' ? '' : v)}>
+            <SelectTrigger className="bg-background sm:w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Categories</SelectItem>
+              {categories.map(c => (
+                <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="lg:flex-1 lg:overflow-y-auto lg:pr-1">
           {filteredProducts.length === 0 ? (
-            <div className="text-center py-20 text-zinc-400 text-sm bg-white border border-zinc-200 rounded-xl">
+            <div className="flex flex-col items-center gap-2 rounded-xl border bg-card py-20 text-center text-sm text-muted-foreground">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+                <Search className="size-5 text-primary" />
+              </span>
               No matching products found.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {filteredProducts.map(p => {
                 const liveStock = getAvailableStock(p)
                 const isOutOfStock = liveStock <= 0
@@ -226,33 +240,32 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
                     key={p.id}
                     disabled={isOutOfStock || isMaxed || loading}
                     onClick={() => addToCart(p)}
-                    className="flex flex-col justify-between text-left p-4 bg-white border border-zinc-200 rounded-xl hover:border-zinc-400 focus:outline-none transition group cursor-pointer disabled:opacity-60"
+                    className="card-interactive group flex cursor-pointer flex-col justify-between rounded-xl border bg-card p-4 text-left shadow-card outline-none disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-card"
                   >
                     <div>
-                      <div className="flex justify-between items-start gap-1">
-                        <span className="font-medium text-zinc-900 line-clamp-2 text-sm group-hover:text-emerald-600 transition">
+                      <div className="flex items-start justify-between gap-1">
+                        <span className="line-clamp-2 text-sm font-medium text-foreground transition-colors group-hover:text-primary">
                           {p.name}
                         </span>
                         {cartItem && (
-                          <span className="bg-emerald-500 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
-                            {cartItem.quantity}
-                          </span>
+                          <Badge className="shrink-0">{cartItem.quantity}</Badge>
                         )}
                       </div>
-                      <span className="block text-xs font-mono text-zinc-400 mt-1">
+                      <span className="mt-1 block font-mono text-xs text-muted-foreground">
                         {p.sku ?? 'No SKU'}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between mt-4 pt-2 border-t border-zinc-50 w-full">
-                      <span className="text-base font-semibold text-zinc-800">
+                    <div className="mt-4 flex w-full items-center justify-between border-t pt-2">
+                      <span className="text-base font-semibold text-foreground">
                         ₱{Number(p.price).toFixed(2)}
                       </span>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                        isOutOfStock ? 'bg-red-50 text-red-600' : 'bg-zinc-100 text-zinc-600'
-                      }`}>
+                      <Badge
+                        variant={isOutOfStock ? 'destructive' : 'outline'}
+                        className={isOutOfStock ? '' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
+                      >
                         {isOutOfStock ? 'Sold Out' : `${liveStock} units`}
-                      </span>
+                      </Badge>
                     </div>
                   </button>
                 )
@@ -262,68 +275,70 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
         </div>
       </div>
 
-      <form onSubmit={handleCheckout} className="lg:w-5/12 flex flex-col lg:h-full bg-white">
-        <div className="p-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50">
+      <form onSubmit={handleCheckout} className="flex flex-col bg-card lg:h-full lg:w-5/12">
+        <div className="flex items-center justify-between border-b bg-gradient-brand-soft p-4">
           <div>
-            <h2 className="text-sm font-semibold text-zinc-900">Current Ticket</h2>
-            <p className="text-xs text-zinc-500">{totalItems} items selected</p>
+            <h2 className="text-sm font-semibold text-foreground">Current Ticket</h2>
+            <p className="text-xs text-muted-foreground">{totalItems} items selected</p>
           </div>
           {cart.length > 0 && !loading && (
-            <button
-              type="button"
-              onClick={clearCart}
-              className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer transition"
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={clearCart} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
               Clear Cart
-            </button>
+            </Button>
           )}
         </div>
 
-        <div className="lg:flex-1 lg:overflow-y-auto divide-y divide-zinc-100 px-4">
+        <div className="divide-y px-4 lg:flex-1 lg:overflow-y-auto">
           {cart.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-zinc-400 py-12 lg:py-20 lg:h-full">
-              <span className="text-3xl mb-2">🛒</span>
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground lg:h-full lg:py-20">
+              <span className="mb-2 flex size-14 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+                <ShoppingCart className="size-6 text-primary" />
+              </span>
               <p className="text-sm font-medium">Cart is currently empty</p>
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.product.id} className="py-3.5 flex items-center justify-between gap-3">
+              <div key={item.product.id} className="flex items-center justify-between gap-3 py-3.5">
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-sm font-medium text-zinc-800 truncate">{item.product.name}</h4>
-                  <p className="text-xs text-zinc-400 mt-0.5">₱{Number(item.product.price).toFixed(2)} each</p>
+                  <h4 className="truncate text-sm font-medium text-foreground">{item.product.name}</h4>
+                  <p className="mt-0.5 text-xs text-muted-foreground">₱{Number(item.product.price).toFixed(2)} each</p>
                 </div>
 
-                <div className="flex items-center gap-1.5 border border-zinc-200 rounded-lg p-1 bg-zinc-50">
-                  <button
+                <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="icon-sm"
                     disabled={loading}
                     onClick={() => updateQuantity(item.product.id, -1)}
-                    className="w-7 h-7 text-sm rounded-md bg-white border border-zinc-100 shadow-sm flex items-center justify-center font-bold text-zinc-600 hover:bg-zinc-100 transition cursor-pointer"
+                    aria-label="Decrease quantity"
                   >
-                    -
-                  </button>
-                  <span className="w-8 text-center text-xs font-semibold text-zinc-800 font-mono">{item.quantity}</span>
-                  <button
+                    <Minus />
+                  </Button>
+                  <span className="w-8 text-center font-mono text-xs font-semibold text-foreground">{item.quantity}</span>
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="icon-sm"
                     disabled={item.quantity >= getAvailableStock(item.product) || loading}
                     onClick={() => updateQuantity(item.product.id, 1)}
-                    className="w-7 h-7 text-sm rounded-md bg-white border border-zinc-100 shadow-sm flex items-center justify-center font-bold text-zinc-600 hover:bg-zinc-100 transition cursor-pointer disabled:opacity-40"
+                    aria-label="Increase quantity"
                   >
-                    +
-                  </button>
+                    <Plus />
+                  </Button>
                 </div>
 
-                <div className="text-right min-w-[70px]">
-                  <span className="text-sm font-semibold text-zinc-900 block">
+                <div className="min-w-[70px] text-right">
+                  <span className="block text-sm font-semibold text-foreground">
                     ₱{(item.product.price * item.quantity).toFixed(2)}
                   </span>
                   {!loading && (
                     <button
                       type="button"
                       onClick={() => removeItem(item.product.id)}
-                      className="text-[10px] text-zinc-400 hover:text-red-500 transition cursor-pointer"
+                      className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground transition-colors hover:text-destructive"
                     >
-                      Remove
+                      <X className="size-2.5" /> Remove
                     </button>
                   )}
                 </div>
@@ -332,18 +347,18 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
           )}
         </div>
 
-        <div className="p-4 border-t border-zinc-200 bg-zinc-50 space-y-3.5">
+        <div className="space-y-3.5 border-t bg-muted/30 p-4">
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-zinc-500">
+            <div className="flex justify-between text-xs text-muted-foreground">
               <span>Subtotal</span>
               <span>₱{cartTotal.toFixed(2)}</span>
             </div>
 
-            <div className="pt-2 flex items-center justify-between gap-4">
-              <label className="text-xs font-medium text-zinc-700 whitespace-nowrap">Cash Tendered</label>
+            <div className="flex items-center justify-between gap-4 pt-2">
+              <label className="whitespace-nowrap text-xs font-medium text-foreground">Cash Tendered</label>
               <div className="relative max-w-[160px] flex-1">
-                <span className="absolute left-3 top-2.5 text-xs text-zinc-400 font-medium">₱</span>
-                <input
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">₱</span>
+                <Input
                   type="number"
                   step="0.01"
                   required
@@ -351,29 +366,30 @@ export default function PosClient({ initialProducts, categories, ingredients }: 
                   placeholder="0.00"
                   value={cashReceived}
                   onChange={e => setCashReceived(e.target.value)}
-                  className="w-full bg-white border border-zinc-200 rounded-lg pl-6 pr-3 py-1.5 text-right text-sm font-mono text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="bg-background pl-6 text-right font-mono"
                 />
               </div>
             </div>
 
-            <div className="flex justify-between text-xs text-zinc-500 pt-1">
+            <div className="flex justify-between pt-1 text-xs text-muted-foreground">
               <span>Change Amount</span>
-              <span className="font-mono text-zinc-700">₱{cashChange.toFixed(2)}</span>
+              <span className="font-mono text-foreground">₱{cashChange.toFixed(2)}</span>
             </div>
 
-            <div className="flex justify-between text-base font-bold text-zinc-900 pt-2 border-t border-zinc-200/60">
+            <div className="flex justify-between rounded-lg bg-gradient-brand-soft px-3 py-2.5 text-base font-bold text-foreground">
               <span>Total Bill</span>
-              <span className="font-mono text-emerald-600">₱{cartTotal.toFixed(2)}</span>
+              <span className="font-mono text-primary">₱{cartTotal.toFixed(2)}</span>
             </div>
           </div>
 
-          <button
+          <Button
             type="submit"
+            size="lg"
+            className="w-full"
             disabled={cart.length === 0 || loading || parseFloat(cashReceived) < cartTotal || !cashReceived}
-            className="w-full bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-200 disabled:text-zinc-400 text-white font-medium py-3 rounded-xl transition shadow-sm text-sm cursor-pointer"
           >
             {loading ? 'Processing Sale...' : 'Finalize Sale & Print Receipt'}
-          </button>
+          </Button>
         </div>
       </form>
 

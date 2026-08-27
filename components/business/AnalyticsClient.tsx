@@ -14,8 +14,14 @@ import {
   Filler
 } from 'chart.js'
 import { Line, Doughnut } from 'react-chartjs-2'
+import { Card } from '@/components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { CheckCircle2 } from 'lucide-react'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler)
+
+// Matches the brand chart tokens defined in globals.css (--chart-1..5).
+const CHART_COLORS = ['#6d4aff', '#f59e0b', '#0d9488', '#ec4899', '#0ea5e9']
 
 type Props = {
   salesRaw: { total: number; created_at: string }[]
@@ -56,8 +62,8 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
           fill: true,
           label: 'Sales Revenue Timeline (₱)',
           data: Object.values(daysMap),
-          borderColor: 'rgb(59, 130, 246)',
-          backgroundColor: 'rgba(59, 130, 246, 0.05)',
+          borderColor: CHART_COLORS[0],
+          backgroundColor: 'color-mix(in srgb, ' + CHART_COLORS[0] + ' 10%, transparent)',
           tension: 0.2,
           borderWidth: 2,
         },
@@ -70,160 +76,158 @@ export default function AnalyticsClient({ salesRaw, topProducts, categoryShares,
     datasets: [
       {
         data: categoryShares.map(c => c.value),
-        backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444'],
+        backgroundColor: CHART_COLORS,
         borderWidth: 2,
       }
     ]
   }), [categoryShares])
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1600px] mx-auto space-y-6 bg-zinc-50 min-h-full">
+    <div className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-zinc-900 tracking-tight">Analytics</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Performance metrics across recipe costing, daily and monthly windows, and net margins.</p>
+          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Analytics</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">Performance metrics across recipe costing, daily and monthly windows, and net margins.</p>
         </div>
 
-        <div className="flex gap-2 bg-indigo-50 border border-indigo-100 p-3 rounded-xl shadow-xs">
-          <div className="pr-4 border-r border-indigo-200/60">
-            <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-wider block">Today&apos;s Sales</span>
-            <h4 className="text-sm font-mono font-black text-indigo-700 mt-0.5">
+        <Card className="flex-row gap-0 divide-x bg-gradient-brand-soft p-3">
+          <div className="pr-4">
+            <span className="block text-[9px] font-bold font-mono uppercase tracking-wider text-primary">Today&apos;s Sales</span>
+            <h4 className="mt-0.5 font-mono text-sm font-black text-foreground">
               ₱{kpis.todayRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </h4>
           </div>
-          <div className="pl-2">
-            <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-wider block">Today&apos;s Net Margin</span>
-            <h4 className="text-sm font-mono font-black text-emerald-600 mt-0.5">
+          <div className="pl-4">
+            <span className="block text-[9px] font-bold font-mono uppercase tracking-wider text-primary">Today&apos;s Net Margin</span>
+            <h4 className="mt-0.5 font-mono text-sm font-black text-emerald-600 dark:text-emerald-400">
               ₱{kpis.todayProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </h4>
           </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm">
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Monthly Revenue</span>
-          <h3 className="text-lg font-mono font-bold text-zinc-900 mt-1">₱{kpis.grossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
-          <span className="text-[10px] text-zinc-400">Total volume sold</span>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Card className="p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-muted-foreground">Monthly Revenue</span>
+          <h3 className="mt-1 font-mono text-lg font-bold text-foreground">₱{kpis.grossRevenue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
+          <span className="text-[10px] text-muted-foreground">Total volume sold</span>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-red-400">
-          <span className="text-[10px] font-bold text-red-600 uppercase tracking-wider block">Monthly COGS</span>
-          <h3 className="text-lg font-mono font-bold text-red-600 mt-1">₱{kpis.totalCOGS.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
-          <span className="text-[10px] text-zinc-400">Recipe + direct costs</span>
-        </div>
+        <Card className="border-l-4 border-l-red-400 p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-red-600 dark:text-red-400">Monthly COGS</span>
+          <h3 className="mt-1 font-mono text-lg font-bold text-red-600 dark:text-red-400">₱{kpis.totalCOGS.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
+          <span className="text-[10px] text-muted-foreground">Recipe + direct costs</span>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-blue-500">
-          <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">Monthly Gross Profit</span>
-          <h3 className="text-lg font-mono font-bold text-blue-600 mt-1">₱{kpis.grossProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
-          <span className="text-[10px] text-zinc-500">Revenue minus COGS</span>
-        </div>
+        <Card className="border-l-4 border-l-sky-500 p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-sky-600 dark:text-sky-400">Monthly Gross Profit</span>
+          <h3 className="mt-1 font-mono text-lg font-bold text-sky-600 dark:text-sky-400">₱{kpis.grossProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
+          <span className="text-[10px] text-muted-foreground">Revenue minus COGS</span>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-amber-500">
-          <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider block">Monthly OpEx</span>
-          <h3 className="text-lg font-mono font-bold text-amber-600 mt-1">₱{kpis.totalOpEx.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
-          <span className="text-[10px] text-zinc-500">Fixed operational bills</span>
-        </div>
+        <Card className="border-l-4 border-l-amber-500 p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-amber-600 dark:text-amber-400">Monthly OpEx</span>
+          <h3 className="mt-1 font-mono text-lg font-bold text-amber-600 dark:text-amber-400">₱{kpis.totalOpEx.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
+          <span className="text-[10px] text-muted-foreground">Fixed operational bills</span>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm border-l-4 border-l-emerald-500">
-          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">Monthly Net Profit</span>
-          <h3 className="text-lg font-mono font-bold text-emerald-600 mt-1">₱{kpis.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
-          <span className="text-[10px] text-zinc-500">Clean cash remaining</span>
-        </div>
+        <Card className="border-l-4 border-l-emerald-500 p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Monthly Net Profit</span>
+          <h3 className="mt-1 font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">₱{kpis.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h3>
+          <span className="text-[10px] text-muted-foreground">Clean cash remaining</span>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-sm">
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Net Profit Margin</span>
-          <h3 className={`text-lg font-mono font-bold mt-1 ${kpis.profitMarginPercentage > 20 ? 'text-emerald-600' : 'text-red-600'}`}>
+        <Card className="p-4">
+          <span className="block text-[10px] font-bold font-mono uppercase tracking-wider text-muted-foreground">Net Profit Margin</span>
+          <h3 className={`mt-1 font-mono text-lg font-bold ${kpis.profitMarginPercentage > 20 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
             {kpis.profitMarginPercentage.toFixed(1)}%
           </h3>
-          <span className="text-[10px] text-zinc-400">Target parameter {'>'} 20%</span>
-        </div>
+          <span className="text-[10px] text-muted-foreground">Target parameter {'>'} 20%</span>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-4">Sales Timeline (7 days)</h3>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="p-5 lg:col-span-2">
+          <h3 className="mb-4 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Sales Timeline (7 days)</h3>
           <div className="relative h-64 w-full">
             <Line data={revenueChartData} options={{ responsive: true, maintainAspectRatio: false }} />
           </div>
-        </div>
+        </Card>
 
-        <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-4">Category Shares</h3>
-          <div className="relative h-64 w-full flex items-center justify-center">
+        <Card className="p-5">
+          <h3 className="mb-4 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Category Shares</h3>
+          <div className="relative flex h-64 w-full items-center justify-center">
             {categoryShares.length === 0 ? (
-              <span className="text-xs text-zinc-400 font-medium">No sales metrics recorded.</span>
+              <span className="text-xs font-medium text-muted-foreground">No sales metrics recorded.</span>
             ) : (
               <Doughnut data={categoryChartData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }} />
             )}
           </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3">Product Volume & Margins</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-zinc-100 text-zinc-400 uppercase font-bold bg-zinc-50/50">
-                  <th className="p-3">Product</th>
-                  <th className="p-3 text-center">Units Sold</th>
-                  <th className="p-3 text-right">Revenue</th>
-                  <th className="p-3 text-right">Net Profit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 font-medium text-zinc-700">
-                {topProducts.length === 0 ? (
-                  <tr><td colSpan={4} className="p-4 text-center text-zinc-400 italic">No checkout items logged this month.</td></tr>
-                ) : (
-                  topProducts.map((p, i) => (
-                    <tr key={i} className="hover:bg-zinc-50/40 transition">
-                      <td className="p-3 font-bold text-zinc-900">{p.name}</td>
-                      <td className="p-3 text-center font-mono">{p.qty} pcs</td>
-                      <td className="p-3 text-right font-mono">₱{p.revenue.toFixed(2)}</td>
-                      <td className="p-3 text-right font-mono text-emerald-600 font-bold">₱{p.profit.toFixed(2)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="p-5 lg:col-span-2">
+          <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Product Volume &amp; Margins</h3>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gradient-brand-soft hover:bg-gradient-brand-soft">
+                <TableHead className="p-3">Product</TableHead>
+                <TableHead className="p-3 text-center">Units Sold</TableHead>
+                <TableHead className="p-3 text-right">Revenue</TableHead>
+                <TableHead className="p-3 text-right">Net Profit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {topProducts.length === 0 ? (
+                <TableRow><TableCell colSpan={4} className="p-4 text-center text-muted-foreground">No checkout items logged this month.</TableCell></TableRow>
+              ) : (
+                topProducts.map((p, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="p-3 font-bold text-foreground">{p.name}</TableCell>
+                    <TableCell className="p-3 text-center font-mono">{p.qty} pcs</TableCell>
+                    <TableCell className="p-3 text-right font-mono">₱{p.revenue.toFixed(2)}</TableCell>
+                    <TableCell className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">₱{p.profit.toFixed(2)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </Card>
 
         <div className="space-y-6">
-          <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-            <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3 text-red-600">Low Stock Ingredients ({lowStockIngredients.length})</h3>
-            <div className="space-y-2 max-h-44 overflow-y-auto">
+          <Card className="p-5">
+            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-red-600 dark:text-red-400">Low Stock Ingredients ({lowStockIngredients.length})</h3>
+            <div className="max-h-44 space-y-2 overflow-y-auto">
               {lowStockIngredients.length === 0 ? (
-                <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-100 p-3 rounded-lg font-medium text-center">
-                  ✓ All raw ingredients safely buffered above trigger marks.
+                <div className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-center text-xs font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
+                  <CheckCircle2 className="size-3.5" /> All raw ingredients safely buffered above trigger marks.
                 </div>
               ) : (
                 lowStockIngredients.map((ing, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs bg-red-50/50 border border-red-100 p-2.5 rounded-lg">
-                    <span className="font-bold text-zinc-900">{ing.name}</span>
-                    <span className="font-mono font-bold text-red-600 bg-white px-2 py-0.5 rounded border border-red-100">
+                  <div key={idx} className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50/50 p-2.5 text-xs dark:border-red-900 dark:bg-red-950/40">
+                    <span className="font-bold text-foreground">{ing.name}</span>
+                    <span className="rounded border border-red-100 bg-background px-2 py-0.5 font-mono font-bold text-red-600 dark:border-red-900 dark:text-red-400">
                       {ing.current_stock} remaining (Alert @ {ing.min_stock_alert})
                     </span>
                   </div>
                 ))
               )}
             </div>
-          </div>
+          </Card>
 
-          <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
-            <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3 text-blue-600">Ingredient Cost Matrix</h3>
-            <div className="space-y-1.5 max-h-44 overflow-y-auto font-medium text-xs">
+          <Card className="p-5">
+            <h3 className="mb-3 text-xs font-bold font-mono uppercase tracking-wider text-sky-600 dark:text-sky-400">Ingredient Cost Matrix</h3>
+            <div className="max-h-44 space-y-1.5 overflow-y-auto text-xs font-medium">
               {ingredientsCostList.map((ing, idx) => (
-                <div key={idx} className="flex justify-between p-2 hover:bg-zinc-50 rounded transition">
-                  <span className="text-zinc-700">{ing.name}</span>
-                  <span className="font-mono text-zinc-900 font-bold">₱{ing.cost.toFixed(4)} / unit</span>
+                <div key={idx} className="flex justify-between rounded p-2 transition-colors hover:bg-muted/50">
+                  <span className="text-foreground">{ing.name}</span>
+                  <span className="font-mono font-bold text-foreground">₱{ing.cost.toFixed(4)} / unit</span>
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </div>

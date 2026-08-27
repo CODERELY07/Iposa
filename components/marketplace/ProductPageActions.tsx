@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/marketplace/cart-context'
 import type { MarketplaceProduct } from '@/lib/types/marketplace'
+import { Button } from '@/components/ui/button'
+import { ShoppingCart, Zap, Check } from 'lucide-react'
 
 // `refCode` comes from this exact page's own `?ref=` query param (read
 // server-side and passed down) — never from a cookie or storage. Add to
@@ -40,21 +42,13 @@ export default function ProductPageActions({ product, refCode }: { product: Mark
   }
 
   return (
-    <div className="flex gap-3 mt-2">
-      <button
-        onClick={handleAdd}
-        disabled={outOfStock}
-        className="flex-1 text-sm font-semibold text-white bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 disabled:text-zinc-400 px-4 py-2.5 rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-      >
-        {outOfStock ? 'Out of stock' : added ? 'Added ✓' : 'Add to Cart'}
-      </button>
-      <button
-        onClick={handleBuyNow}
-        disabled={outOfStock}
-        className="flex-1 text-sm font-semibold text-zinc-900 bg-white border border-zinc-300 hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 rounded-lg transition cursor-pointer"
-      >
-        Buy Now
-      </button>
+    <div className="mt-2 flex gap-3">
+      <Button size="lg" className="flex-1" onClick={handleAdd} disabled={outOfStock}>
+        {outOfStock ? 'Out of stock' : added ? <><Check /> Added</> : <><ShoppingCart /> Add to Cart</>}
+      </Button>
+      <Button size="lg" variant="outline" className="flex-1" onClick={handleBuyNow} disabled={outOfStock}>
+        <Zap /> Buy Now
+      </Button>
     </div>
   )
 }

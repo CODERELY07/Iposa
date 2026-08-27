@@ -2,6 +2,8 @@ import { requireApprovedBusiness, createClient } from '@/lib/supabase/server'
 import BusinessSettingsForm from '@/components/marketplace/BusinessSettingsForm'
 import AffiliateSettingsForm from '@/components/marketplace/AffiliateSettingsForm'
 import ManagerPinForm from '@/components/business/ManagerPinForm'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Store, Link2, KeyRound } from 'lucide-react'
 import type { BusinessAffiliateSettings } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -17,30 +19,56 @@ export default async function SellSettingsPage() {
     .maybeSingle<BusinessAffiliateSettings>()
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-zinc-900">Shop Settings</h1>
-        <p className="text-sm text-zinc-400 mt-0.5">Update how your shop appears on the marketplace.</p>
-      </div>
-      <div className="bg-white border border-zinc-200 rounded-xl p-6">
-        <BusinessSettingsForm business={business} />
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Shop Settings</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">Update how your shop appears on the marketplace.</p>
       </div>
 
-      <div>
-        <h2 className="text-base font-bold text-zinc-900">Affiliate Program</h2>
-        <p className="text-sm text-zinc-400 mt-0.5">Let affiliates earn a commission for sales they refer to your shop.</p>
-      </div>
-      <div className="bg-white border border-zinc-200 rounded-xl p-6">
-        <AffiliateSettingsForm settings={affiliateSettings ?? null} />
-      </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--brand-violet),transparent_88%)] text-primary">
+            <Store className="size-4" />
+          </span>
+          <div>
+            <CardTitle>Storefront</CardTitle>
+            <CardDescription>Name, description, and branding shown to customers.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <BusinessSettingsForm business={business} />
+        </CardContent>
+      </Card>
 
-      <div>
-        <h2 className="text-base font-bold text-zinc-900">POS Security PIN</h2>
-        <p className="text-sm text-zinc-400 mt-0.5">Required to void a transaction in POS Sales History.</p>
-      </div>
-      <div className="bg-white border border-zinc-200 rounded-xl p-6">
-        <ManagerPinForm />
-      </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--brand-teal),transparent_88%)] text-[color:var(--brand-teal)]">
+            <Link2 className="size-4" />
+          </span>
+          <div>
+            <CardTitle>Affiliate Program</CardTitle>
+            <CardDescription>Let affiliates earn a commission for sales they refer to your shop.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <AffiliateSettingsForm settings={affiliateSettings ?? null} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--brand-amber),transparent_88%)] text-[color:var(--brand-amber)]">
+            <KeyRound className="size-4" />
+          </span>
+          <div>
+            <CardTitle>POS Security PIN</CardTitle>
+            <CardDescription>Required to void a transaction in POS Sales History.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ManagerPinForm />
+        </CardContent>
+      </Card>
     </div>
   )
 }

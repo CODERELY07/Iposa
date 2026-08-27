@@ -3,6 +3,10 @@ import Link from 'next/link'
 import { createClient, getCurrentUserRole } from '@/lib/supabase/server'
 import ProductPageActions from '@/components/marketplace/ProductPageActions'
 import ShareProductButton from '@/components/marketplace/ShareProductButton'
+import { Badge } from '@/components/ui/badge'
+import CategoryBadge from '@/components/marketplace/CategoryBadge'
+import { Separator } from '@/components/ui/separator'
+import { ChevronRight, PackageOpen } from 'lucide-react'
 import type { MarketplaceProduct } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -51,44 +55,55 @@ export default async function ProductDetailPage({
   const outOfStock = product.stock <= 0
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="aspect-square bg-zinc-50 border border-zinc-200 rounded-xl flex items-center justify-center overflow-hidden">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <nav className="mb-5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Link href="/" className="hover:text-foreground">Browse</Link>
+        <ChevronRight className="size-3" />
+        <Link href={`/shop/${product.business_slug}`} className="hover:text-foreground">{product.business_name}</Link>
+        <ChevronRight className="size-3" />
+        <span className="truncate text-foreground">{product.name}</span>
+      </nav>
+
+      <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-gradient-brand-soft shadow-card">
           {product.image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+            <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
           ) : (
-            <span className="text-5xl text-zinc-300">📦</span>
+            <PackageOpen className="size-16 text-primary/30" />
           )}
         </div>
 
         <div className="flex flex-col gap-3">
-          <Link href={`/shop/${product.business_slug}`} className="text-sm font-semibold text-blue-600 hover:underline w-fit">
+          <Link href={`/shop/${product.business_slug}`} className="label-mono w-fit hover:text-primary">
             {product.business_name}
           </Link>
 
           <div className="flex items-start justify-between gap-3">
-            <h1 className="text-2xl font-bold text-zinc-900">{product.name}</h1>
+            <h1 className="font-serif text-3xl font-normal tracking-tight text-foreground">{product.name}</h1>
             <ShareProductButton path={`/shop/${slug}/${productSlug}`} refCode={affiliateCode} />
           </div>
 
           {product.category_name && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 w-fit">
-              {product.category_name}
-            </span>
+            <CategoryBadge name={product.category_name} className="w-fit font-mono uppercase tracking-wider" />
           )}
 
-          <span className="text-2xl font-mono font-bold text-zinc-900">
+          <span className="text-2xl font-bold tracking-tight text-foreground">
             ₱{Number(product.price).toFixed(2)}
           </span>
 
+          <Separator />
+
           {product.description && (
-            <p className="text-sm text-zinc-600 leading-relaxed whitespace-pre-line">{product.description}</p>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{product.description}</p>
           )}
 
-          <p className={`text-xs ${outOfStock ? 'text-red-600' : 'text-zinc-400'}`}>
+          <Badge
+            variant={outOfStock ? 'destructive' : 'outline'}
+            className={outOfStock ? 'w-fit' : 'w-fit border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
+          >
             {outOfStock ? 'Out of stock' : `${product.stock} in stock`}
-          </p>
+          </Badge>
 
           <ProductPageActions product={product} refCode={ref ?? null} />
         </div>

@@ -1,5 +1,7 @@
 import SalesHistoryClient from '@/components/business/SalesHistoryClient'
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -15,12 +17,15 @@ export default async function SellSalesHistoryPage() {
 
   if (salesError) {
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 m-6 rounded-xl border border-red-100 max-w-2xl mx-auto shadow-sm">
-        <h3 className="font-bold text-base mb-1">Failed to load sales history</h3>
-        <pre className="p-3 bg-zinc-900 text-zinc-100 font-mono text-[11px] rounded-lg overflow-x-auto whitespace-pre-wrap">
-          {salesError.message}
-        </pre>
-      </div>
+      <Alert variant="destructive" className="mx-auto m-6 max-w-2xl">
+        <AlertCircle />
+        <AlertTitle>Failed to load sales history</AlertTitle>
+        <AlertDescription>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-foreground p-3 font-mono text-[11px] text-background">
+            {salesError.message}
+          </pre>
+        </AlertDescription>
+      </Alert>
     )
   }
 

@@ -3,6 +3,14 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { StoreCategory } from '@/lib/types/marketplace'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card } from '@/components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Plus, Tag } from 'lucide-react'
 
 type Props = {
   initialCategories: StoreCategory[]
@@ -83,114 +91,100 @@ export default function CategoriesClient({ initialCategories, canEditDelete }: P
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-3xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+    <div className="mx-auto max-w-3xl p-4 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-900">Categories</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">{categories.length} total &middot; shared across the whole marketplace</p>
+          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Categories</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">{categories.length} total &middot; shared across the whole marketplace</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer self-start sm:self-auto shrink-0"
-        >
-          <span className="text-base leading-none">+</span> Add category
-        </button>
+        <Button onClick={openCreate} className="shrink-0 self-start sm:self-auto">
+          <Plus /> Add category
+        </Button>
       </div>
 
-      <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
+      <Card className="overflow-hidden py-0">
         {categories.length === 0 ? (
-          <div className="text-center py-16 text-zinc-400 text-sm">
+          <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-muted-foreground">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+              <Tag className="size-5 text-primary" />
+            </span>
             No categories yet. Add one to get started.
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-100 bg-zinc-50">
-                <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">Name</th>
-                <th className="text-left text-xs font-medium text-zinc-500 uppercase tracking-wider px-5 py-3">Created</th>
-                {canEditDelete && <th className="px-5 py-3" />}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-gradient-brand-soft hover:bg-gradient-brand-soft">
+                <TableHead className="px-5 py-3">Name</TableHead>
+                <TableHead className="px-5 py-3">Created</TableHead>
+                {canEditDelete && <TableHead className="px-5 py-3" />}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {categories.map(cat => (
-                <tr key={cat.id} className="hover:bg-zinc-50 transition">
-                  <td className="px-5 py-3.5 font-medium text-zinc-800">{cat.name}</td>
-                  <td className="px-5 py-3.5 text-zinc-400">
+                <TableRow key={cat.id}>
+                  <TableCell className="px-5 py-3.5 font-medium text-foreground">{cat.name}</TableCell>
+                  <TableCell className="px-5 py-3.5 text-muted-foreground">
                     {new Date(cat.created_at).toLocaleDateString()}
-                  </td>
+                  </TableCell>
                   {canEditDelete && (
-                    <td className="px-5 py-3.5">
+                    <TableCell className="px-5 py-3.5">
                       <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => openEdit(cat)}
-                          className="text-xs text-zinc-500 hover:text-zinc-900 px-2.5 py-1 border border-zinc-200 rounded-md hover:border-zinc-300 transition cursor-pointer"
-                        >
-                          Edit
-                        </button>
-                        <button
+                        <Button variant="outline" size="sm" onClick={() => openEdit(cat)}>Edit</Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
                           onClick={() => handleDelete(cat.id)}
                           disabled={deleteId === cat.id}
-                          className="text-xs text-red-500 hover:text-red-700 px-2.5 py-1 border border-red-100 rounded-md hover:border-red-200 transition cursor-pointer disabled:opacity-50"
                         >
                           {deleteId === cat.id ? '…' : 'Delete'}
-                        </button>
+                        </Button>
                       </div>
-                    </td>
+                    </TableCell>
                   )}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </Card>
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-lg font-semibold text-zinc-900 mb-4">
-              {editing ? 'Edit category' : 'New category'}
-            </h2>
+      <Dialog open={modalOpen} onOpenChange={open => !open && closeModal()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit category' : 'New category'}</DialogTitle>
+          </DialogHeader>
 
-            {error && (
-              <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                {error}
-              </div>
-            )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-zinc-700">Name</label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={form.name}
-                  onChange={e => setForm({ name: e.target.value })}
-                  placeholder="e.g. Electronics"
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
-                />
-              </div>
+          <form onSubmit={handleSave} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="category-name">Name</Label>
+              <Input
+                id="category-name"
+                required
+                autoFocus
+                value={form.name}
+                onChange={e => setForm({ name: e.target.value })}
+                placeholder="e.g. Electronics"
+              />
+            </div>
 
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 text-sm text-zinc-600 border border-zinc-200 rounded-lg py-2.5 hover:bg-zinc-50 transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 rounded-lg py-2.5 transition cursor-pointer"
-                >
-                  {loading ? 'Saving…' : editing ? 'Save changes' : 'Create'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <DialogFooter className="-mx-4 -mb-4 border-t bg-transparent p-0 pt-4 sm:justify-stretch">
+              <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>
+                Cancel
+              </Button>
+              <Button type="submit" className="flex-1" disabled={loading}>
+                {loading ? 'Saving…' : editing ? 'Save changes' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

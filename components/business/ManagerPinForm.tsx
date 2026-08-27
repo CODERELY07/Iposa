@@ -1,18 +1,22 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import { updateManagerPinAction } from '@/app/sell/settings/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 export default function ManagerPinForm() {
   const [isPending, startTransition] = useTransition()
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    setSaved(false)
 
     startTransition(async () => {
       const result = await updateManagerPinAction(pin)
@@ -21,19 +25,23 @@ export default function ManagerPinForm() {
         return
       }
       setPin('')
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      toast.success('PIN updated.')
     })
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3 max-w-xs">
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div>}
-      {saved && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg p-3">PIN updated.</div>}
+    <form onSubmit={handleSubmit} className="max-w-xs space-y-3">
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="space-y-1">
-        <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">4-digit PIN</label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="manager-pin">4-digit PIN</Label>
+        <Input
+          id="manager-pin"
           type="password"
           maxLength={4}
           pattern="\d*"
@@ -42,17 +50,14 @@ export default function ManagerPinForm() {
           value={pin}
           onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
           placeholder="••••"
-          className="w-32 bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2 text-center font-mono text-lg tracking-widest text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900"
+          className="w-32 text-center font-mono text-lg tracking-widest"
         />
       </div>
 
-      <button
-        type="submit"
-        disabled={isPending || pin.length !== 4}
-        className="bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-300 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition cursor-pointer"
-      >
+      <Button type="submit" disabled={isPending || pin.length !== 4}>
+        {isPending && <Loader2 className="animate-spin" />}
         {isPending ? 'Saving…' : 'Save PIN'}
-      </button>
+      </Button>
     </form>
   )
 }

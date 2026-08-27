@@ -1,5 +1,7 @@
 import { createClient, requireApprovedBusiness, getCurrentUserRole } from '@/lib/supabase/server'
 import CategoriesClient from '@/components/business/CategoriesClient'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export default async function SellCategoriesPage() {
   await requireApprovedBusiness()
@@ -13,9 +15,10 @@ export default async function SellCategoriesPage() {
 
   if (error) {
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 rounded-lg m-6">
-        Failed to load categories: {error.message}
-      </div>
+      <Alert variant="destructive" className="m-6">
+        <AlertCircle />
+        <AlertDescription>Failed to load categories: {error.message}</AlertDescription>
+      </Alert>
     )
   }
 

@@ -2,6 +2,11 @@
 
 import { useState, useTransition } from 'react'
 import type { OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
+import { Card } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { OrderStatusBadge } from '@/components/marketplace/StatusBadge'
+import { AlertCircle, PackageX } from 'lucide-react'
 
 type OrderRow = {
   id: string
@@ -16,15 +21,6 @@ type OrderRow = {
 }
 
 const STATUS_FLOW: OrderStatus[] = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled']
-
-const STATUS_STYLES: Record<OrderStatus, string> = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-100',
-  paid: 'bg-blue-50 text-blue-700 border-blue-100',
-  processing: 'bg-blue-50 text-blue-700 border-blue-100',
-  shipped: 'bg-violet-50 text-violet-700 border-violet-100',
-  completed: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  cancelled: 'bg-red-50 text-red-700 border-red-100',
-}
 
 export default function StoreOrdersClient({
   orders,
@@ -52,69 +48,79 @@ export default function StoreOrdersClient({
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
+    <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-zinc-900">Orders</h1>
-        <p className="text-sm text-zinc-400 mt-0.5">{orders.length} orders total</p>
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Orders</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">{orders.length} orders total</p>
       </div>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {orders.length === 0 && (
-        <div className="text-center py-16 text-sm text-zinc-400 border border-dashed border-zinc-200 rounded-xl bg-white">
-          No orders yet.
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed bg-card py-16 text-center">
+          <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+            <PackageX className="size-6 text-primary" />
+          </span>
+          <p className="text-sm text-muted-foreground">No orders yet.</p>
         </div>
       )}
 
       {orders.map(order => (
-        <div key={order.id} className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between gap-3 flex-wrap">
+        <Card key={order.id} className="overflow-hidden py-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-gradient-brand-soft px-4 py-3">
             <div>
-              <p className="text-xs text-zinc-400 font-mono">#{order.id.slice(0, 8)}</p>
-              <p className="text-sm font-bold text-zinc-900">{order.shipping_name ?? 'Customer'}</p>
-              <p className="text-[11px] text-zinc-400">{new Date(order.created_at).toLocaleString()}</p>
+              <p className="font-mono text-xs text-muted-foreground">#{order.id.slice(0, 8)}</p>
+              <p className="text-sm font-bold text-foreground">{order.shipping_name ?? 'Customer'}</p>
+              <p className="text-[11px] text-muted-foreground">{new Date(order.created_at).toLocaleString()}</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${STATUS_STYLES[order.status]}`}>
-                {order.status}
-              </span>
-              <select
+              <OrderStatusBadge status={order.status} />
+              <Select
                 value={order.status}
                 disabled={isPending && busyId === order.id}
-                onChange={e => handleChange(order.id, e.target.value as OrderStatus)}
-                className="text-xs border border-zinc-200 rounded-lg px-2 py-1.5 bg-white"
+                onValueChange={value => handleChange(order.id, value as OrderStatus)}
               >
-                {STATUS_FLOW.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+                <SelectTrigger size="sm" className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_FLOW.map(s => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Items</p>
+              <p className="mb-1 text-[10px] font-bold font-mono uppercase tracking-wider text-muted-foreground">Items</p>
               <div className="space-y-1 text-sm">
                 {order.store_order_items.map(item => (
-                  <div key={item.id} className="flex justify-between text-zinc-700">
+                  <div key={item.id} className="flex justify-between text-foreground">
                     <span>{item.product_name} × {item.quantity}</span>
                     <span className="font-mono">₱{Number(item.subtotal).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
-              <div className="flex justify-between text-sm font-bold text-zinc-900 mt-2 pt-2 border-t border-zinc-100">
+              <div className="mt-2 flex justify-between border-t pt-2 text-sm font-bold text-foreground">
                 <span>Total</span>
                 <span className="font-mono">₱{Number(order.total).toFixed(2)}</span>
               </div>
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Delivery</p>
-              <p className="text-sm text-zinc-700">{order.shipping_phone}</p>
-              <p className="text-sm text-zinc-700">{order.shipping_address}</p>
-              {order.notes && <p className="text-xs text-zinc-400 mt-1 italic">&quot;{order.notes}&quot;</p>}
+              <p className="mb-1 text-[10px] font-bold font-mono uppercase tracking-wider text-muted-foreground">Delivery</p>
+              <p className="text-sm text-foreground">{order.shipping_phone}</p>
+              <p className="text-sm text-foreground">{order.shipping_address}</p>
+              {order.notes && <p className="mt-1 text-xs italic text-muted-foreground">&quot;{order.notes}&quot;</p>}
             </div>
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   )

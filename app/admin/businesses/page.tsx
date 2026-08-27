@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import BusinessReviewClient from '@/components/marketplace/BusinessReviewClient'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -12,16 +14,17 @@ export default async function AdminBusinessesPage() {
     .order('created_at', { ascending: false })
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="mb-5">
-        <h1 className="text-xl font-bold text-zinc-900">Business Applications</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">Review, approve, or reject storefront requests.</p>
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Business Applications</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">Review, approve, or reject storefront requests.</p>
       </div>
 
       {error ? (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-4">
-          Failed to load businesses: {error.message}
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>Failed to load businesses: {error.message}</AlertDescription>
+        </Alert>
       ) : (
         <BusinessReviewClient businesses={businesses ?? []} />
       )}

@@ -1,63 +1,57 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import { reviewPayoutAction } from '@/app/admin/payouts/actions'
 import type { AffiliatePayout } from '@/lib/types/marketplace'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Landmark } from 'lucide-react'
 
 export default function PayoutReviewClient({ payouts }: { payouts: AffiliatePayout[] }) {
   const [isPending, startTransition] = useTransition()
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   function review(id: string, status: 'paid' | 'rejected') {
-    setError(null)
     setBusyId(id)
     startTransition(async () => {
       const result = await reviewPayoutAction(id, status)
-      if (!result.success) setError(result.message)
+      if (!result.success) toast.error(result.message)
       setBusyId(null)
     })
   }
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div>
-      )}
-
       {payouts.length === 0 && (
-        <div className="text-center py-16 text-sm text-zinc-400 border border-dashed border-zinc-200 rounded-xl bg-white">
-          No pending payout requests.
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed bg-card py-16 text-center">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+            <Landmark className="size-5 text-primary" />
+          </span>
+          <p className="text-sm text-muted-foreground">No pending payout requests.</p>
         </div>
       )}
 
       {payouts.map(p => (
-        <div key={p.id} className="bg-white border border-zinc-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <Card key={p.id} className="flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h3 className="text-sm font-bold text-zinc-900">{p.affiliates?.full_name ?? 'Affiliate'}</h3>
-            <p className="text-xs text-zinc-400 font-mono mt-0.5">Code: {p.affiliates?.code}</p>
-            <p className="text-sm font-mono font-semibold text-zinc-900 mt-2">
+            <h3 className="text-sm font-bold text-foreground">{p.affiliates?.full_name ?? 'Affiliate'}</h3>
+            <Badge variant="outline" className="mt-1 font-mono">{p.affiliates?.code}</Badge>
+            <p className="mt-2 font-mono text-sm font-semibold text-foreground">
               ₱{Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
-            <p className="text-[11px] text-zinc-400 mt-1">Requested {new Date(p.requested_at).toLocaleString()}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Requested {new Date(p.requested_at).toLocaleString()}</p>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <button
-              onClick={() => review(p.id, 'paid')}
-              disabled={isPending && busyId === p.id}
-              className="text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-3 py-1.5 rounded-lg transition cursor-pointer"
-            >
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'paid')}>
               Mark paid
-            </button>
-            <button
-              onClick={() => review(p.id, 'rejected')}
-              disabled={isPending && busyId === p.id}
-              className="text-xs font-semibold text-red-600 border border-red-100 hover:bg-red-50 disabled:opacity-50 px-3 py-1.5 rounded-lg transition cursor-pointer"
-            >
+            </Button>
+            <Button size="sm" variant="destructive" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'rejected')}>
               Reject
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       ))}
     </div>
   )

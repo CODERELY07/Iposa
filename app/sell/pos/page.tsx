@@ -1,5 +1,7 @@
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import PosClient from '@/components/business/PosClient'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -31,9 +33,11 @@ export default async function SellPosPage() {
 
   if (pErr || cErr || iErr) {
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 rounded-lg m-6">
-        Failed to initialize POS engine: {pErr?.message ?? cErr?.message ?? iErr?.message}
-      </div>
+      <Alert variant="destructive" className="m-6">
+        <AlertCircle />
+        <AlertTitle>Failed to initialize POS engine</AlertTitle>
+        <AlertDescription>{pErr?.message ?? cErr?.message ?? iErr?.message}</AlertDescription>
+      </Alert>
     )
   }
 

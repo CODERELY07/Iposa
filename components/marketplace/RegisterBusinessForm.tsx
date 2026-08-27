@@ -2,6 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import { registerBusinessAction } from '@/app/(auth)/(route group)/register-business/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 export default function RegisterBusinessForm() {
   const [isPending, startTransition] = useTransition()
@@ -24,41 +30,26 @@ export default function RegisterBusinessForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2.5">
-          <span className="mt-px">⚠</span>
-          <span>{error}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <div className="space-y-1.5">
-        <label htmlFor="name" className="block text-sm font-medium text-zinc-700">Shop name</label>
-        <input
-          id="name"
-          name="name"
-          required
-          placeholder="e.g., Maria's Bakeshop"
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
-        />
+        <Label htmlFor="name">Shop name</Label>
+        <Input id="name" name="name" required placeholder="e.g., Maria's Bakeshop" />
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="description" className="block text-sm font-medium text-zinc-700">Tell customers about your shop</label>
-        <textarea
-          id="description"
-          name="description"
-          rows={3}
-          placeholder="What do you sell?"
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
-        />
+        <Label htmlFor="description">Tell customers about your shop</Label>
+        <Textarea id="description" name="description" rows={3} placeholder="What do you sell?" />
       </div>
 
-      <button
-        type="submit"
-        disabled={isPending}
-        className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed"
-      >
+      <Button type="submit" size="lg" disabled={isPending} className="mt-2 w-full">
+        {isPending && <Loader2 className="animate-spin" />}
         {isPending ? 'Submitting…' : 'Submit application'}
-      </button>
+      </Button>
     </form>
   )
 }

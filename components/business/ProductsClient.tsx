@@ -2,6 +2,19 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import type { Ingredient, RecipeItem, StoreCategory, StoreProduct } from '@/lib/types/marketplace'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import CategoryBadge from '@/components/marketplace/CategoryBadge'
+import { Card } from '@/components/ui/card'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Plus, Search, PackageSearch, X } from 'lucide-react'
 
 type Props = {
   initialProducts: StoreProduct[]
@@ -32,6 +45,12 @@ const EMPTY_FORM = {
   price: '',
   stock: '0',
   is_active: true,
+}
+
+const NO_CATEGORY = '__none__'
+
+function unitLabel(unitType: string) {
+  return unitType === 'pieces' ? 'pcs' : unitType === 'grams' ? 'g' : 'ml'
 }
 
 export default function ProductsClient({ initialProducts, categories, ingredients, onSaveAction, onDeleteAction }: Props) {
@@ -117,10 +136,10 @@ export default function ProductsClient({ initialProducts, categories, ingredient
     setError(null)
   }
 
-  function field(key: 'name' | 'category_id' | 'sku' | 'description' | 'image_url' | 'cost_price' | 'price' | 'stock') {
+  function field(key: 'name' | 'sku' | 'description' | 'image_url' | 'cost_price' | 'price' | 'stock') {
     return {
       value: form[key],
-      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
         setForm(f => ({ ...f, [key]: e.target.value })),
     }
   }
@@ -144,8 +163,6 @@ export default function ProductsClient({ initialProducts, categories, ingredient
   function removeIngredientFromRecipe(ingId: number) {
     setRecipeItems(prev => prev.filter(item => item.ingredient_id !== ingId))
   }
-
-  const inputCls = 'w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition font-medium'
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -192,271 +209,297 @@ export default function ProductsClient({ initialProducts, categories, ingredient
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+    <div className="mx-auto max-w-7xl p-4 sm:p-6">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-zinc-900">Products</h1>
-          <p className="text-sm text-zinc-400 mt-0.5">{filtered.length} products &middot; sold in-store via POS and listed on your marketplace shop</p>
+          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Products</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">{filtered.length} products &middot; sold in-store via POS and listed on your marketplace shop</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition cursor-pointer self-start sm:self-auto shrink-0"
-        >
-          + Add Product
-        </button>
+        <Button onClick={openCreate} className="shrink-0 self-start sm:self-auto">
+          <Plus /> Add Product
+        </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 mb-4">
-        <input
-          type="text"
-          placeholder="Search catalog items..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="flex-1 bg-white border border-zinc-200 rounded-lg px-3.5 py-2 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition"
-        />
-        <select
-          value={filterCat}
-          onChange={e => setFilterCat(e.target.value)}
-          className="bg-white border border-zinc-200 rounded-lg px-3.5 py-2 text-sm text-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition cursor-pointer"
-        >
-          <option value="">All categories</option>
-          {categories.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-        </select>
-      </div>
-
-      <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-100 bg-zinc-50/70 text-left text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                <th className="p-4">Item</th>
-                <th className="p-4">Category</th>
-                <th className="p-4 font-mono text-[11px]">SKU</th>
-                <th className="p-4 text-right">Cost</th>
-                <th className="p-4 text-right">Price</th>
-                <th className="p-4 text-center">Type</th>
-                <th className="p-4 text-center">Stock</th>
-                <th className="p-4 text-center">Listed</th>
-                <th className="p-4"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 font-medium text-zinc-700">
-              {filtered.map(p => {
-                const hasRecipe = p.recipes && p.recipes.length > 0
-
-                let totalCostForAnalytics = Number(p.cost_price)
-                if (hasRecipe && p.recipes) {
-                  totalCostForAnalytics = p.recipes.reduce((sum, r) => {
-                    const ing = ingredients.find(i => i.id === r.ingredient_id)
-                    return sum + (Number(ing?.cost_per_unit ?? 0) * r.quantity_used)
-                  }, 0)
-                }
-
-                const dynamicStock = hasRecipe && p.recipes ? calculateRecipeStock(p.recipes) : p.stock
-
-                return (
-                  <tr key={p.id} className="hover:bg-zinc-50/50 transition">
-                    <td className="p-4 font-bold text-zinc-900">{p.name}</td>
-                    <td className="p-4">
-                      {p.categories?.name ? (
-                        <span className="bg-zinc-100 text-zinc-600 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded">
-                          {p.categories.name}
-                        </span>
-                      ) : <span className="text-zinc-300">—</span>}
-                    </td>
-                    <td className="p-4 font-mono text-zinc-400 text-xs">{p.sku ?? '—'}</td>
-                    <td className="p-4 text-right font-mono text-zinc-900">
-                      ₱{totalCostForAnalytics.toFixed(2)}
-                      <span className="text-[9px] block text-zinc-400 font-sans font-bold">
-                        {hasRecipe ? '(Recipe Cost)' : '(Supplier Cost)'}
-                      </span>
-                    </td>
-                    <td className="p-4 text-right font-mono font-bold text-zinc-900">₱{Number(p.price).toFixed(2)}</td>
-                    <td className="p-4 text-center">
-                      {hasRecipe ? (
-                        <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded uppercase tracking-wider">Recipe</span>
-                      ) : (
-                        <span className="text-[10px] font-bold bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-wider">Standalone</span>
-                      )}
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${dynamicStock === 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'}`}>
-                        {dynamicStock} units
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${p.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-500'}`}>
-                        {p.is_active ? 'Active' : 'Hidden'}
-                      </span>
-                    </td>
-                    <td className="p-4 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => openEdit(p)} className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 rounded bg-white transition cursor-pointer">Edit</button>
-                        <button onClick={() => handleDelete(p.id)} disabled={deleteId === p.id} className="text-xs text-red-500 hover:text-red-700 border border-red-50 px-2.5 py-1 rounded bg-white transition cursor-pointer disabled:opacity-40">✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="p-10 text-center text-zinc-400 text-sm">No products yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search catalog items..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="bg-background pl-8"
+          />
         </div>
+        <Select value={filterCat || '__all__'} onValueChange={v => setFilterCat(!v || v === '__all__' ? '' : v)}>
+          <SelectTrigger className="bg-background sm:w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All categories</SelectItem>
+            {categories.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-6 max-h-[92vh] overflow-y-auto grid grid-cols-1 gap-5">
-            <div>
-              <h2 className="text-base font-bold text-zinc-900">{editing ? 'Edit Product' : 'Add Product'}</h2>
-              <p className="text-[11px] text-zinc-400 mt-0.5">Stock configurations adapt automatically based on your raw ingredient consumption.</p>
+      <Card className="overflow-hidden py-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gradient-brand-soft hover:bg-gradient-brand-soft">
+              <TableHead className="p-4">Item</TableHead>
+              <TableHead className="p-4">Category</TableHead>
+              <TableHead className="p-4 font-mono text-[11px]">SKU</TableHead>
+              <TableHead className="p-4 text-right">Cost</TableHead>
+              <TableHead className="p-4 text-right">Price</TableHead>
+              <TableHead className="p-4 text-center">Type</TableHead>
+              <TableHead className="p-4 text-center">Stock</TableHead>
+              <TableHead className="p-4 text-center">Listed</TableHead>
+              <TableHead className="p-4" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map(p => {
+              const hasRecipe = p.recipes && p.recipes.length > 0
+
+              let totalCostForAnalytics = Number(p.cost_price)
+              if (hasRecipe && p.recipes) {
+                totalCostForAnalytics = p.recipes.reduce((sum, r) => {
+                  const ing = ingredients.find(i => i.id === r.ingredient_id)
+                  return sum + (Number(ing?.cost_per_unit ?? 0) * r.quantity_used)
+                }, 0)
+              }
+
+              const dynamicStock = hasRecipe && p.recipes ? calculateRecipeStock(p.recipes) : p.stock
+
+              return (
+                <TableRow key={p.id}>
+                  <TableCell className="whitespace-normal p-4 font-bold text-foreground">{p.name}</TableCell>
+                  <TableCell className="p-4">
+                    {p.categories?.name ? (
+                      <CategoryBadge name={p.categories.name} />
+                    ) : <span className="text-muted-foreground/50">—</span>}
+                  </TableCell>
+                  <TableCell className="p-4 font-mono text-xs text-muted-foreground">{p.sku ?? '—'}</TableCell>
+                  <TableCell className="p-4 text-right font-mono text-foreground">
+                    ₱{totalCostForAnalytics.toFixed(2)}
+                    <span className="block font-sans text-[9px] font-bold text-muted-foreground">
+                      {hasRecipe ? '(Recipe Cost)' : '(Supplier Cost)'}
+                    </span>
+                  </TableCell>
+                  <TableCell className="p-4 text-right font-mono font-bold text-foreground">₱{Number(p.price).toFixed(2)}</TableCell>
+                  <TableCell className="p-4 text-center">
+                    <Badge variant={hasRecipe ? 'default' : 'outline'} className="font-mono uppercase tracking-wider">
+                      {hasRecipe ? 'Recipe' : 'Standalone'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="p-4 text-center">
+                    <Badge variant={dynamicStock === 0 ? 'destructive' : 'secondary'} className={dynamicStock !== 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' : ''}>
+                      {dynamicStock} units
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="p-4 text-center">
+                    <Badge variant={p.is_active ? 'default' : 'secondary'} className="font-mono uppercase tracking-wider">
+                      {p.is_active ? 'Active' : 'Hidden'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="p-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEdit(p)}>Edit</Button>
+                      <Button variant="destructive" size="icon-sm" onClick={() => handleDelete(p.id)} disabled={deleteId === p.id} aria-label="Delete product">
+                        <X />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+            {filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={9} className="p-10 text-center text-muted-foreground">
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+                      <PackageSearch className="size-5 text-primary" />
+                    </span>
+                    No products yet.
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <Dialog open={modalOpen} onOpenChange={open => !open && closeModal()}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit Product' : 'Add Product'}</DialogTitle>
+            <DialogDescription>Stock configurations adapt automatically based on your raw ingredient consumption.</DialogDescription>
+          </DialogHeader>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <form onSubmit={handleSave} className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Product Name *</Label>
+                <Input required autoFocus placeholder="e.g., Sisig Rice Bowl" {...field('name')} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Category</Label>
+                <Select
+                  value={form.category_id || NO_CATEGORY}
+                  onValueChange={v => setForm(f => ({ ...f, category_id: !v || v === NO_CATEGORY ? '' : v }))}
+                >
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_CATEGORY}>No category assigned</SelectItem>
+                    {categories.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 p-2.5 rounded-lg font-medium">{error}</div>}
-
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Product Name *</label>
-                  <input type="text" required autoFocus placeholder="e.g., Sisig Rice Bowl" {...field('name')} className={inputCls} />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Category</label>
-                  <select {...field('category_id')} className={inputCls}>
-                    <option value="">No category assigned</option>
-                    {categories.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">SKU / Barcode</label>
-                  <input type="text" placeholder="e.g., RET-COKE" {...field('sku')} className={inputCls} />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">
-                    Stock
-                    {recipeItems.length > 0 && <span className="text-[10px] text-blue-500 ml-1">(Calculated)</span>}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    placeholder="0"
-                    disabled={recipeItems.length > 0}
-                    value={recipeItems.length > 0 ? (liveFormRecipeStock ?? 0) : form.stock}
-                    onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
-                    className={`${inputCls} disabled:bg-zinc-200/50 disabled:text-zinc-500 font-bold`}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-zinc-50 border border-zinc-100 p-3 rounded-xl">
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-500 font-bold">
-                    Cost Price (₱)
-                    {recipeItems.length > 0 && <span className="text-[10px] text-blue-500 ml-1">(Bypassed by Recipe)</span>}
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    disabled={recipeItems.length > 0}
-                    placeholder="0.00"
-                    {...field('cost_price')}
-                    className={`${inputCls} disabled:bg-zinc-200/50 disabled:text-zinc-400`}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs text-zinc-500 font-bold">Selling Price (₱) *</label>
-                  <input type="number" required min="0" step="0.01" placeholder="0.00" {...field('price')} className={inputCls} />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Image URL</label>
-                <input type="url" placeholder="https://…" {...field('image_url')} className={inputCls} />
+                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">SKU / Barcode</Label>
+                <Input placeholder="e.g., RET-COKE" {...field('sku')} />
               </div>
-
               <div className="space-y-1">
-                <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Description</label>
-                <textarea rows={2} {...field('description')} className={inputCls} />
-              </div>
-
-              <label className="flex items-center gap-2 text-sm text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
+                <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">
+                  Stock
+                  {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Calculated)</span>}
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                  disabled={recipeItems.length > 0}
+                  value={recipeItems.length > 0 ? (liveFormRecipeStock ?? 0) : form.stock}
+                  onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
+                  className="font-bold"
                 />
-                Visible on your public marketplace shop
-              </label>
+              </div>
+            </div>
 
-              {/* SECTION: Recipe Assembly */}
-              <div className="border-t border-zinc-100 pt-4">
-                <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-wider mb-1">Recipe Construction</h3>
-                <p className="text-[10px] text-zinc-400 mb-3">Adding ingredients locks manual stock and computes available units from your ingredient inventory.</p>
+            <div className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/40 p-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-muted-foreground">
+                  Cost Price (₱)
+                  {recipeItems.length > 0 && <span className="ml-1 text-[10px] text-primary">(Bypassed by Recipe)</span>}
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  disabled={recipeItems.length > 0}
+                  placeholder="0.00"
+                  {...field('cost_price')}
+                  className="bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-muted-foreground">Selling Price (₱) *</Label>
+                <Input type="number" required min="0" step="0.01" placeholder="0.00" {...field('price')} className="bg-background" />
+              </div>
+            </div>
 
-                <div className="flex gap-2 bg-zinc-50 p-2 rounded-lg border border-zinc-100 items-end mb-3">
-                  <div className="flex-1 space-y-1">
-                    <label className="block text-[10px] uppercase text-zinc-400 font-bold">Ingredient</label>
-                    <select value={selectedIngredientId} onChange={e => setSelectedIngredientId(e.target.value)} className="w-full bg-white border border-zinc-200 text-xs px-2.5 py-1.5 rounded-md">
-                      <option value="">-- Choose Ingredient --</option>
-                      {ingredients.map(ing => <option key={ing.id} value={ing.id}>{ing.name} (Avail: {ing.current_stock} {ing.unit_type === 'pieces' ? 'pcs' : ing.unit_type === 'grams' ? 'g' : 'ml'})</option>)}
-                    </select>
-                  </div>
-                  <div className="w-24 space-y-1">
-                    <label className="block text-[10px] uppercase text-zinc-400 font-bold">Qty</label>
-                    <input type="number" step="0.01" placeholder="Amt" value={quantityUsed} onChange={e => setQuantityUsed(e.target.value)} className="w-full bg-white border border-zinc-200 text-xs px-2.5 py-1.5 rounded-md font-mono" />
-                  </div>
-                  <button type="button" onClick={addIngredientToRecipe} className="bg-zinc-900 text-white font-bold text-xs px-3 py-1.5 rounded-md hover:bg-zinc-800 transition">+</button>
+            <div className="space-y-1">
+              <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Image URL</Label>
+              <Input type="url" placeholder="https://…" {...field('image_url')} />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-bold font-mono uppercase tracking-wider text-muted-foreground">Description</Label>
+              <Textarea rows={2} {...field('description')} />
+            </div>
+
+            <Label className="flex w-fit items-center gap-2.5 font-normal text-foreground">
+              <Checkbox
+                checked={form.is_active}
+                onCheckedChange={value => setForm(f => ({ ...f, is_active: value === true }))}
+              />
+              Visible on your public marketplace shop
+            </Label>
+
+            {/* SECTION: Recipe Assembly */}
+            <div className="border-t pt-4">
+              <h3 className="mb-1 text-xs font-bold font-mono uppercase tracking-wider text-foreground">Recipe Construction</h3>
+              <p className="mb-3 text-[10px] text-muted-foreground">Adding ingredients locks manual stock and computes available units from your ingredient inventory.</p>
+
+              <div className="mb-3 flex items-end gap-2 rounded-lg border bg-muted/40 p-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Ingredient</Label>
+                  <Select value={selectedIngredientId} onValueChange={v => setSelectedIngredientId(v ?? '')}>
+                    <SelectTrigger size="sm" className="w-full bg-background"><SelectValue placeholder="-- Choose Ingredient --" /></SelectTrigger>
+                    <SelectContent>
+                      {ingredients.map(ing => (
+                        <SelectItem key={ing.id} value={String(ing.id)}>
+                          {ing.name} (Avail: {ing.current_stock} {unitLabel(ing.unit_type)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                <div className="w-24 space-y-1">
+                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Qty</Label>
+                  <Input type="number" step="0.01" placeholder="Amt" value={quantityUsed} onChange={e => setQuantityUsed(e.target.value)} className="bg-background font-mono" />
+                </div>
+                <Button type="button" size="icon" onClick={addIngredientToRecipe}><Plus /></Button>
+              </div>
 
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                  {recipeItems.length === 0 ? (
-                    <div className="text-[11px] text-zinc-400 italic bg-zinc-50/50 p-2 text-center rounded border border-dashed border-zinc-200">
-                      Standalone product. Tracked via the fixed stock number above.
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {recipeItems.map((item, idx) => {
-                        const ingObj = ingredients.find(i => i.id === item.ingredient_id)
-                        return (
-                          <div key={idx} className="flex justify-between items-center bg-white border border-zinc-200 px-3 py-1.5 rounded-lg text-xs shadow-xs">
-                            <span className="font-semibold text-zinc-800">{ingObj?.name}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded text-[10px]">
-                                {item.quantity_used} {ingObj?.unit_type === 'pieces' ? 'pcs' : ingObj?.unit_type === 'grams' ? 'g' : 'ml'}
-                              </span>
-                              <button type="button" onClick={() => removeIngredientFromRecipe(item.ingredient_id)} className="text-red-500 font-bold hover:text-red-700">✕</button>
-                            </div>
+              <div className="max-h-32 space-y-1.5 overflow-y-auto">
+                {recipeItems.length === 0 ? (
+                  <div className="rounded border border-dashed p-2 text-center text-[11px] italic text-muted-foreground">
+                    Standalone product. Tracked via the fixed stock number above.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {recipeItems.map((item, idx) => {
+                      const ingObj = ingredients.find(i => i.id === item.ingredient_id)
+                      return (
+                        <div key={idx} className="flex items-center justify-between rounded-lg border bg-card px-3 py-1.5 text-xs">
+                          <span className="font-semibold text-foreground">{ingObj?.name}</span>
+                          <div className="flex items-center gap-3">
+                            <Badge variant="secondary" className="font-mono">
+                              {item.quantity_used} {ingObj ? unitLabel(ingObj.unit_type) : ''}
+                            </Badge>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => removeIngredientFromRecipe(item.ingredient_id)}
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              aria-label="Remove ingredient"
+                            >
+                              <X />
+                            </Button>
                           </div>
-                        )
-                      })}
-                      <div className="flex justify-between text-xs font-bold text-zinc-900 px-1 pt-1 bg-zinc-50 p-2 rounded-lg mt-2 border border-zinc-100">
-                        <div>Recipe Cost: <span className="font-mono text-blue-600">₱{currentRecipeCost.toFixed(2)}</span></div>
-                        <div>Max Yield: <span className="font-mono text-emerald-600">{liveFormRecipeStock} units</span></div>
-                      </div>
+                        </div>
+                      )
+                    })}
+                    <div className="mt-2 flex justify-between rounded-lg border bg-muted/40 p-2 text-xs font-bold text-foreground">
+                      <div>Recipe Cost: <span className="font-mono text-primary">₱{currentRecipeCost.toFixed(2)}</span></div>
+                      <div>Max Yield: <span className="font-mono text-emerald-600 dark:text-emerald-400">{liveFormRecipeStock} units</span></div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
+            </div>
 
-              <div className="flex gap-2 pt-2 border-t border-zinc-100">
-                <button type="button" onClick={closeModal} className="flex-1 text-sm text-zinc-600 border border-zinc-200 rounded-lg py-2 hover:bg-zinc-50 transition cursor-pointer">Cancel</button>
-                <button type="submit" disabled={isPending} className="flex-1 text-sm font-semibold text-white bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-300 rounded-lg py-2 transition cursor-pointer">
-                  {isPending ? 'Saving…' : editing ? 'Save changes' : 'Create Product'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <DialogFooter className="-mx-4 -mb-4 border-t bg-transparent p-0 pt-4 sm:justify-stretch">
+              <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>Cancel</Button>
+              <Button type="submit" disabled={isPending} className="flex-1">
+                {isPending ? 'Saving…' : editing ? 'Save changes' : 'Create Product'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import CheckoutForm from '@/components/marketplace/CheckoutForm'
+import { Card } from '@/components/ui/card'
+import { ClipboardCheck } from 'lucide-react'
 
 export default async function CheckoutPage() {
   const supabase = await createClient()
@@ -15,14 +17,21 @@ export default async function CheckoutPage() {
   const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle()
 
   return (
-    <div className="max-w-xl mx-auto px-4 sm:px-6 py-8">
-      <h1 className="text-xl font-bold text-zinc-900 mb-1">Checkout</h1>
-      <p className="text-sm text-zinc-500 mb-6">
-        Items from different shops are placed as separate orders automatically.
-      </p>
-      <div className="bg-white border border-zinc-200 rounded-xl p-5">
-        <CheckoutForm defaultName={profile?.full_name ?? ''} />
+    <div className="mx-auto max-w-xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex items-center gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-brand text-white shadow-glow-primary">
+          <ClipboardCheck className="size-5" />
+        </span>
+        <div>
+          <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Checkout</h1>
+          <p className="text-sm text-muted-foreground">
+            Items from different shops are placed as separate orders automatically.
+          </p>
+        </div>
       </div>
+      <Card className="p-5">
+        <CheckoutForm defaultName={profile?.full_name ?? ''} />
+      </Card>
     </div>
   )
 }

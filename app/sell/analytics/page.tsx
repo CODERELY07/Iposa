@@ -1,5 +1,7 @@
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import AnalyticsClient from '@/components/business/AnalyticsClient'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -43,12 +45,15 @@ export default async function SellAnalyticsPage() {
       productsErr: productsResult.error?.message
     })
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 m-6 rounded-xl border border-red-100 max-w-2xl mx-auto shadow-sm">
-        <h3 className="font-bold text-base mb-1">Analytics Calculation Error</h3>
-        <pre className="p-3 bg-zinc-900 text-zinc-100 font-mono text-[11px] rounded-lg overflow-x-auto whitespace-pre-wrap">
-          {salesResult.error?.message || itemsResult.error?.message || 'Unknown error.'}
-        </pre>
-      </div>
+      <Alert variant="destructive" className="mx-auto m-6 max-w-2xl">
+        <AlertCircle />
+        <AlertTitle>Analytics Calculation Error</AlertTitle>
+        <AlertDescription>
+          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-foreground p-3 font-mono text-[11px] text-background">
+            {salesResult.error?.message || itemsResult.error?.message || 'Unknown error.'}
+          </pre>
+        </AlertDescription>
+      </Alert>
     )
   }
 

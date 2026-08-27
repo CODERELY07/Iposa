@@ -2,6 +2,17 @@
 
 import { useState, useTransition } from 'react'
 import { registerAffiliateAction } from '@/app/(auth)/(route group)/become-affiliate/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Loader2 } from 'lucide-react'
+
+// Plain native <select> (not the shadcn Select) so its value keeps reading
+// straight out of FormData in the server action — styled to match anyway.
+const selectClass =
+  'h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
 export default function RegisterAffiliateForm() {
   const [isPending, startTransition] = useTransition()
@@ -24,30 +35,20 @@ export default function RegisterAffiliateForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2.5">
-          <span className="mt-px">⚠</span>
-          <span>{error}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <div className="space-y-1.5">
-        <label htmlFor="full_name" className="block text-sm font-medium text-zinc-700">Full name</label>
-        <input
-          id="full_name"
-          name="full_name"
-          required
-          placeholder="e.g., Juan Dela Cruz"
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-        />
+        <Label htmlFor="full_name">Full name</Label>
+        <Input id="full_name" name="full_name" required placeholder="e.g., Juan Dela Cruz" />
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="payout_method" className="block text-sm font-medium text-zinc-700">Payout method</label>
-        <select
-          id="payout_method"
-          name="payout_method"
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-        >
+        <Label htmlFor="payout_method">Payout method</Label>
+        <select id="payout_method" name="payout_method" className={selectClass}>
           <option value="GCash">GCash</option>
           <option value="Bank Transfer">Bank Transfer</option>
           <option value="PayMaya">PayMaya</option>
@@ -55,23 +56,14 @@ export default function RegisterAffiliateForm() {
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="payout_details" className="block text-sm font-medium text-zinc-700">Payout details</label>
-        <textarea
-          id="payout_details"
-          name="payout_details"
-          rows={2}
-          placeholder="Account name and number"
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-        />
+        <Label htmlFor="payout_details">Payout details</Label>
+        <Textarea id="payout_details" name="payout_details" rows={2} placeholder="Account name and number" />
       </div>
 
-      <button
-        type="submit"
-        disabled={isPending}
-        className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed"
-      >
+      <Button type="submit" size="lg" disabled={isPending} className="mt-2 w-full">
+        {isPending && <Loader2 className="animate-spin" />}
         {isPending ? 'Submitting…' : 'Submit application'}
-      </button>
+      </Button>
     </form>
   )
 }

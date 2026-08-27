@@ -1,6 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Check, Copy } from 'lucide-react'
 
 type LinkRow = {
   label: string
@@ -32,18 +35,16 @@ export default function LinkGenerator({ code, links }: { code: string; links: Li
     <div className="space-y-2">
       {links.map(link => (
         <div key={link.path} className="flex items-center gap-2">
-          <input
+          <Input
             readOnly
             value={buildUrl(link.path)}
             onFocus={e => e.currentTarget.select()}
-            className="flex-1 min-w-0 text-xs font-mono bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-zinc-600"
+            className="min-w-0 flex-1 bg-muted/40 font-mono text-xs text-muted-foreground"
           />
-          <button
-            onClick={() => copy(link.path)}
-            className="shrink-0 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg transition cursor-pointer"
-          >
+          <Button size="sm" onClick={() => copy(link.path)} className="shrink-0">
+            {copiedPath === link.path ? <Check /> : <Copy />}
             {copiedPath === link.path ? 'Copied!' : 'Copy'}
-          </button>
+          </Button>
         </div>
       ))}
     </div>

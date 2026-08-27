@@ -8,9 +8,12 @@ type Props = {
   className?: string
   redirectTo?: string
   icon?: React.ReactNode
+  // For a collapsed icon-only sidebar — keeps the label for screen readers
+  // instead of removing it outright.
+  hideLabel?: boolean
 }
 
-export default function SignOutButton({ className, redirectTo = '/login', icon }: Props) {
+export default function SignOutButton({ className, redirectTo = '/login', icon, hideLabel }: Props) {
   const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
 
@@ -29,7 +32,7 @@ export default function SignOutButton({ className, redirectTo = '/login', icon }
       className={className}
     >
       {icon}
-      {signingOut ? 'Signing out…' : 'Sign out'}
+      <span className={hideLabel ? 'sr-only' : undefined}>{signingOut ? 'Signing out…' : 'Sign out'}</span>
     </button>
   )
 }

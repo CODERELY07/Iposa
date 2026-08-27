@@ -1,6 +1,8 @@
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import ProductsClient from '@/components/business/ProductsClient'
 import { saveProductAction, deleteProductAction } from './actions'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle } from 'lucide-react'
 
 export const revalidate = 0
 
@@ -20,9 +22,10 @@ export default async function SellProductsPage() {
 
   if (error) {
     return (
-      <div className="p-6 text-sm text-red-600 bg-red-50 rounded-lg m-6">
-        Failed to load products: {error.message}
-      </div>
+      <Alert variant="destructive" className="m-6">
+        <AlertCircle />
+        <AlertDescription>Failed to load products: {error.message}</AlertDescription>
+      </Alert>
     )
   }
 

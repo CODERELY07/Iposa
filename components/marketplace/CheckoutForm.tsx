@@ -2,8 +2,15 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { useCart } from '@/lib/marketplace/cart-context'
 import { placeOrderAction } from '@/app/(marketplace)/checkout/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 export default function CheckoutForm({ defaultName }: { defaultName: string }) {
   const { items, totalPrice, clear } = useCart()
@@ -23,6 +30,7 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
         return
       }
       clear()
+      toast.success('Order placed! Track it from My Orders.')
       router.push('/orders')
     })
   }
@@ -30,61 +38,61 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       <div className="space-y-1.5">
-        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400">Full name</label>
-        <input
+        <Label htmlFor="name">Full name</Label>
+        <Input
+          id="name"
           required
           value={form.name}
           onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400">Phone number</label>
-        <input
+        <Label htmlFor="phone">Phone number</Label>
+        <Input
+          id="phone"
           required
           value={form.phone}
           onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400">Delivery address</label>
-        <textarea
+        <Label htmlFor="address">Delivery address</Label>
+        <Textarea
+          id="address"
           required
           rows={3}
           value={form.address}
           onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400">Notes (optional)</label>
-        <textarea
+        <Label htmlFor="notes">Notes (optional)</Label>
+        <Textarea
+          id="notes"
           rows={2}
           value={form.notes}
           onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
         />
       </div>
 
-      <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
-        <span className="text-sm text-zinc-500">
-          Total: <span className="font-mono font-bold text-zinc-900">₱{totalPrice.toFixed(2)}</span>
+      <div className="flex items-center justify-between rounded-xl bg-gradient-brand-soft p-4">
+        <span className="text-sm text-muted-foreground">
+          Total: <span className="font-mono text-lg font-bold text-foreground">₱{totalPrice.toFixed(2)}</span>
         </span>
-        <button
-          type="submit"
-          disabled={isPending || items.length === 0}
-          className="bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-300 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-        >
+        <Button type="submit" size="lg" disabled={isPending || items.length === 0}>
+          {isPending && <Loader2 className="animate-spin" />}
           {isPending ? 'Placing order…' : 'Place order'}
-        </button>
+        </Button>
       </div>
     </form>
   )

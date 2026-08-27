@@ -4,11 +4,17 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useCart } from '@/lib/marketplace/cart-context'
 import type { MarketplaceProduct } from '@/lib/types/marketplace'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
+import CategoryBadge from '@/components/marketplace/CategoryBadge'
+import { PackageOpen, Plus, Check } from 'lucide-react'
 
 export default function ProductCard({ product }: { product: MarketplaceProduct }) {
   const { addItem } = useCart()
   const [added, setAdded] = useState(false)
   const outOfStock = product.stock <= 0
+  const productHref = `/shop/${product.business_slug}/${product.slug}`
 
   function handleAdd() {
     addItem({
@@ -23,50 +29,48 @@ export default function ProductCard({ product }: { product: MarketplaceProduct }
     setTimeout(() => setAdded(false), 1200)
   }
 
-  const productHref = `/shop/${product.business_slug}/${product.slug}`
-
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-      <Link href={productHref} className="aspect-square bg-zinc-50 flex items-center justify-center overflow-hidden">
+    <Card className="card-interactive group overflow-hidden py-0">
+      <Link href={productHref} className="relative flex aspect-4/3 items-center justify-center overflow-hidden bg-gradient-brand-soft">
         {product.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+          <img
+            src={product.image_url}
+            alt={product.name}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
         ) : (
-          <span className="text-3xl text-zinc-300">📦</span>
+          <PackageOpen className="size-10 text-primary/30" />
+        )}
+        {outOfStock && (
+          <Badge variant="destructive" className="absolute left-2 top-2 shadow-sm">Out of stock</Badge>
         )}
       </Link>
 
-      <div className="p-3.5 flex flex-col gap-1.5 flex-1">
-        <Link
-          href={`/shop/${product.business_slug}`}
-          className="text-[11px] font-semibold text-blue-600 hover:underline truncate"
-        >
+      <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+        <Link href={`/shop/${product.business_slug}`} className="label-mono truncate hover:text-primary">
           {product.business_name}
         </Link>
 
         <Link href={productHref}>
-          <h3 className="text-sm font-bold text-zinc-900 leading-snug line-clamp-2 hover:text-blue-600 transition">{product.name}</h3>
+          <h3 className="line-clamp-2 text-[15px] font-medium leading-[1.35] tracking-[-0.005em] text-foreground transition-colors group-hover:text-primary">
+            {product.name}
+          </h3>
         </Link>
 
         {product.category_name && (
-          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-            {product.category_name}
-          </span>
+          <CategoryBadge name={product.category_name} className="w-fit text-[10px] font-mono uppercase tracking-wider" />
         )}
 
-        <div className="mt-auto pt-2 flex items-center justify-between gap-2">
-          <span className="text-base font-mono font-bold text-zinc-900">
+        <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-2.5">
+          <span className="text-base font-bold tracking-[-0.01em] text-foreground">
             ₱{Number(product.price).toFixed(2)}
           </span>
-          <button
-            onClick={handleAdd}
-            disabled={outOfStock}
-            className="text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 disabled:text-zinc-400 px-3 py-1.5 rounded-lg transition cursor-pointer disabled:cursor-not-allowed"
-          >
-            {outOfStock ? 'Out of stock' : added ? 'Added ✓' : 'Add to cart'}
-          </button>
+          <Button size="icon" onClick={handleAdd} disabled={outOfStock} aria-label="Add to cart">
+            {added ? <Check /> : <Plus />}
+          </Button>
         </div>
       </div>
-    </div>
+    </Card>
   )
 }

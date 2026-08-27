@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Link2, Check } from 'lucide-react'
 
 // Builds and copies this exact product's link. When the viewer is a signed-in
 // approved affiliate, the link is tagged with `?ref=<code>` — that tag is
@@ -22,13 +24,14 @@ export default function ShareProductButton({ path, refCode }: { path: string; re
   }
 
   return (
-    <button
+    <Button
+      variant="outline"
+      size="sm"
       onClick={handleShare}
       title={refCode ? 'Copy your affiliate link for this product' : 'Copy link to this product'}
-      className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-zinc-600 hover:text-zinc-900 border border-zinc-200 hover:border-zinc-300 bg-white rounded-lg px-3 py-1.5 transition cursor-pointer"
     >
-      <span>🔗</span>
+      {copied ? <Check /> : <Link2 />}
       {copied ? 'Copied!' : 'Share'}
-    </button>
+    </Button>
   )
 }

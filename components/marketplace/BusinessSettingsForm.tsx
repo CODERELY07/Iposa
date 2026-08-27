@@ -1,8 +1,15 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import type { Business } from '@/lib/types/marketplace'
 import { updateBusinessSettingsAction } from '@/app/sell/settings/actions'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Loader2 } from 'lucide-react'
 
 export default function BusinessSettingsForm({ business }: { business: Business }) {
   const [isPending, startTransition] = useTransition()
@@ -13,12 +20,10 @@ export default function BusinessSettingsForm({ business }: { business: Business 
     banner_url: business.banner_url ?? '',
   })
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    setSaved(false)
 
     startTransition(async () => {
       const result = await updateBusinessSettingsAction({
@@ -31,45 +36,43 @@ export default function BusinessSettingsForm({ business }: { business: Business 
         setError(result.message)
         return
       }
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      toast.success('Shop settings saved.')
     })
   }
 
-  const inputCls = 'w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition font-medium'
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-3">{error}</div>}
-      {saved && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg p-3">Saved.</div>}
+    <form onSubmit={handleSubmit} className="max-w-lg space-y-4">
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="space-y-1">
-        <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Shop name *</label>
-        <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className={inputCls} />
+      <div className="space-y-1.5">
+        <Label htmlFor="shop-name">Shop name *</Label>
+        <Input id="shop-name" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
       </div>
 
-      <div className="space-y-1">
-        <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Description</label>
-        <textarea rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className={inputCls} />
+      <div className="space-y-1.5">
+        <Label htmlFor="shop-description">Description</Label>
+        <Textarea id="shop-description" rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
       </div>
 
-      <div className="space-y-1">
-        <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Logo URL</label>
-        <input type="url" placeholder="https://…" value={form.logo_url} onChange={e => setForm(f => ({ ...f, logo_url: e.target.value }))} className={inputCls} />
+      <div className="space-y-1.5">
+        <Label htmlFor="shop-logo">Logo URL</Label>
+        <Input id="shop-logo" type="url" placeholder="https://…" value={form.logo_url} onChange={e => setForm(f => ({ ...f, logo_url: e.target.value }))} />
       </div>
 
-      <div className="space-y-1">
-        <label className="block text-xs text-zinc-400 uppercase tracking-wider font-bold">Banner URL</label>
-        <input type="url" placeholder="https://…" value={form.banner_url} onChange={e => setForm(f => ({ ...f, banner_url: e.target.value }))} className={inputCls} />
+      <div className="space-y-1.5">
+        <Label htmlFor="shop-banner">Banner URL</Label>
+        <Input id="shop-banner" type="url" placeholder="https://…" value={form.banner_url} onChange={e => setForm(f => ({ ...f, banner_url: e.target.value }))} />
       </div>
 
-      <button
-        type="submit"
-        disabled={isPending}
-        className="bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-300 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition cursor-pointer"
-      >
+      <Button type="submit" disabled={isPending}>
+        {isPending && <Loader2 className="animate-spin" />}
         {isPending ? 'Saving…' : 'Save changes'}
-      </button>
+      </Button>
     </form>
   )
 }

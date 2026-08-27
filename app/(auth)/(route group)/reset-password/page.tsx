@@ -3,6 +3,12 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import AuthCard from '@/components/marketplace/AuthCard'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { CheckCircle2, Loader2 } from 'lucide-react'
 
 export default function ResetPasswordPage() {
   const supabase = createClient()
@@ -27,42 +33,33 @@ export default function ResetPasswordPage() {
 
   if (success) {
     return (
-      <div className="w-full max-w-sm bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm">
-        <p className="text-xs font-semibold tracking-widest uppercase text-emerald-700 mb-2">
-          Check your inbox
-        </p>
-        <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Email sent</h1>
-        <p className="text-sm text-zinc-500 mb-6">
-          If <span className="font-medium text-zinc-700">{email}</span> is registered,
-          you&apos;ll receive a reset link shortly.
-        </p>
-        <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-3 py-2.5">
-          <span className="mt-px">✓</span>
-          <span>Check your spam folder if it doesn&apos;t arrive within a few minutes.</span>
-        </div>
-        <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center text-sm">
-          <Link href="/login" className="text-emerald-700 font-medium hover:underline">
-            Back to sign in
-          </Link>
-        </div>
-      </div>
+      <AuthCard
+        eyebrow="Check your inbox"
+        title="Email sent"
+        description={`If ${email} is registered, you'll receive a reset link shortly.`}
+        footer={<Link href="/login" className="font-medium text-primary hover:underline">Back to sign in</Link>}
+      >
+        <Alert className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400">
+          <CheckCircle2 />
+          <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+            Check your spam folder if it doesn&apos;t arrive within a few minutes.
+          </AlertDescription>
+        </Alert>
+      </AuthCard>
     )
   }
 
   return (
-    <div className="w-full max-w-sm bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm">
-      <p className="text-xs font-semibold tracking-widest uppercase text-emerald-700 mb-2">
-        Account recovery
-      </p>
-      <h1 className="text-2xl font-semibold text-zinc-900 mb-1">Reset password</h1>
-      <p className="text-sm text-zinc-500 mb-7">
-        Enter your email and we&apos;ll send you a link to reset your password.
-      </p>
-
+    <AuthCard
+      eyebrow="Account recovery"
+      title="Reset password"
+      description="Enter your email and we'll send you a link to reset your password."
+      footer={<Link href="/login" className="font-medium text-primary hover:underline">Back to sign in</Link>}
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
-          <label htmlFor="email" className="block text-sm font-medium text-zinc-700">Email</label>
-          <input
+          <Label htmlFor="email">Email</Label>
+          <Input
             id="email"
             type="email"
             autoComplete="email"
@@ -70,24 +67,14 @@ export default function ResetPasswordPage() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full mt-2 bg-zinc-900 hover:bg-zinc-700 disabled:bg-zinc-300 text-white text-sm font-medium rounded-lg py-2.5 transition active:scale-[0.99] cursor-pointer disabled:cursor-not-allowed"
-        >
+        <Button type="submit" size="lg" disabled={loading} className="mt-2 w-full">
+          {loading && <Loader2 className="animate-spin" />}
           {loading ? 'Sending…' : 'Send reset link'}
-        </button>
+        </Button>
       </form>
-
-      <div className="mt-6 pt-5 border-t border-zinc-100 flex justify-center text-sm">
-        <Link href="/login" className="text-emerald-700 font-medium hover:underline">
-          Back to sign in
-        </Link>
-      </div>
-    </div>
+    </AuthCard>
   )
 }

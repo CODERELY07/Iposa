@@ -1,8 +1,16 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import type { Ingredient } from '@/lib/types/marketplace'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AlertCircle, Soup } from 'lucide-react'
 
 type Props = {
   businessId: string
@@ -24,7 +32,6 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
 
   const resetForm = () => {
     setFormData({ name: '', current_stock: '', min_stock_alert: '', cost_per_unit: '' })
@@ -45,7 +52,6 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
     e.preventDefault()
     setLoading(true)
     setError(null)
-    setSuccess(null)
 
     const payload = {
       name: formData.name,
@@ -65,7 +71,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
         setError(uErr.message)
       } else if (data) {
         setIngredients(prev => prev.map(i => i.id === editingId ? data[0] : i))
-        setSuccess('Ingredient details updated successfully!')
+        toast.success('Ingredient details updated.')
         resetForm()
       }
     } else {
@@ -78,7 +84,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
         setError(cErr.message)
       } else if (data) {
         setIngredients(prev => [...prev, data[0]])
-        setSuccess('New ingredient registered successfully!')
+        toast.success('New ingredient registered.')
         resetForm()
       }
     }
@@ -93,7 +99,6 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
 
     setLoading(true)
     setError(null)
-    setSuccess(null)
 
     const { error: dErr } = await supabase
       .from('ingredients')
@@ -104,7 +109,7 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
       setError(dErr.message)
     } else {
       setIngredients(prev => prev.filter(i => i.id !== id))
-      setSuccess('Ingredient removed successfully.')
+      toast.success('Ingredient removed.')
       if (editingId === id) resetForm()
     }
     setLoading(false)
@@ -112,112 +117,104 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
   }
 
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-200">
-
-      <div className="p-5 bg-zinc-50/50">
-        <h3 className="text-sm font-semibold text-zinc-900 mb-1">
+    <Card className="grid grid-cols-1 divide-y overflow-hidden py-0 md:grid-cols-3 md:divide-x md:divide-y-0">
+      <div className="bg-muted/30 p-5">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">
           {editingId ? 'Modify Ingredient' : 'Register New Ingredient'}
         </h3>
-        <p className="text-xs text-zinc-500 mb-4">
+        <p className="mb-4 text-xs text-muted-foreground">
           Maintain precise baselines to generate accurate COGS parameters.
         </p>
 
         <form onSubmit={handleSave} className="space-y-3">
-          <div>
-            <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Ingredient Name</label>
-            <input
-              type="text"
+          <div className="space-y-1">
+            <Label htmlFor="ing-name" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Ingredient Name</Label>
+            <Input
+              id="ing-name"
               required
               placeholder="e.g., Espresso Beans, Milk, Syrup"
               value={formData.name}
               onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="bg-background"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Current Stock</label>
-              <input
+            <div className="space-y-1">
+              <Label htmlFor="ing-stock" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Current Stock</Label>
+              <Input
+                id="ing-stock"
                 type="number"
                 step="0.01"
                 required
                 placeholder="0"
                 value={formData.current_stock}
                 onChange={e => setFormData(prev => ({ ...prev, current_stock: e.target.value }))}
-                className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="bg-background font-mono"
               />
             </div>
-            <div>
-              <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Alert Threshold</label>
-              <input
+            <div className="space-y-1">
+              <Label htmlFor="ing-alert" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Alert Threshold</Label>
+              <Input
+                id="ing-alert"
                 type="number"
                 step="0.01"
                 required
                 placeholder="10"
                 value={formData.min_stock_alert}
                 onChange={e => setFormData(prev => ({ ...prev, min_stock_alert: e.target.value }))}
-                className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="bg-background font-mono"
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Cost Per Unit (₱)</label>
+          <div className="space-y-1">
+            <Label htmlFor="ing-cost" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Cost Per Unit (₱)</Label>
             <div className="relative">
-              <span className="absolute left-3 top-1.5 text-xs text-zinc-400 font-medium">₱</span>
-              <input
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">₱</span>
+              <Input
+                id="ing-cost"
                 type="number"
                 step="0.01"
                 required
                 placeholder="0.00"
                 value={formData.cost_per_unit}
                 onChange={e => setFormData(prev => ({ ...prev, cost_per_unit: e.target.value }))}
-                className="w-full bg-white border border-zinc-200 rounded-lg pl-6 pr-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="bg-background pl-6 font-mono"
               />
             </div>
           </div>
 
-          <div className="pt-2 flex gap-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 bg-zinc-900 hover:bg-zinc-700 text-white text-xs font-medium py-2 rounded-lg transition shadow-sm cursor-pointer text-center"
-            >
+          <div className="flex gap-2 pt-2">
+            <Button type="submit" disabled={loading} className="flex-1">
               {editingId ? 'Update Record' : 'Save Ingredient'}
-            </button>
+            </Button>
             {editingId && (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-600 text-xs font-medium px-3 py-2 rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
+              <Button type="button" variant="outline" onClick={resetForm}>Cancel</Button>
             )}
           </div>
         </form>
 
-        {(success || error) && (
-          <div className={`mt-4 p-3 rounded-lg text-xs font-medium border ${
-            success ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'
-          }`}>
-            {success || error}
-          </div>
+        {error && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
 
-      <div className="md:col-span-2 flex flex-col overflow-hidden h-[400px] md:h-[500px]">
-        <div className="p-4 bg-zinc-50 border-b border-zinc-200 flex justify-between items-center">
-          <span className="text-xs font-semibold text-zinc-700">Registered Stock Catalog</span>
-          <span className="text-[11px] font-mono bg-zinc-200 text-zinc-600 px-2 py-0.5 rounded-full font-bold">
-            {ingredients.length} items
-          </span>
+      <div className="flex h-[400px] flex-col overflow-hidden md:col-span-2 md:h-[500px]">
+        <div className="flex items-center justify-between border-b bg-gradient-brand-soft p-4">
+          <span className="text-xs font-semibold text-foreground">Registered Stock Catalog</span>
+          <Badge variant="secondary" className="font-mono">{ingredients.length} items</Badge>
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-zinc-100">
+        <div className="flex-1 divide-y overflow-y-auto">
           {ingredients.length === 0 ? (
-            <div className="text-center py-20 text-sm text-zinc-400">
+            <div className="flex flex-col items-center gap-2 py-20 text-center text-sm text-muted-foreground">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+                <Soup className="size-5 text-primary" />
+              </span>
               No ingredients on file. Use the entry matrix to build your baseline ledger.
             </div>
           ) : (
@@ -225,36 +222,25 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
               const isLowStock = Number(ing.current_stock) <= Number(ing.min_stock_alert)
 
               return (
-                <div key={ing.id} className="p-4 flex items-center justify-between gap-4 hover:bg-zinc-50/60 transition">
+                <div key={ing.id} className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/40">
                   <div className="min-w-0 flex-1">
-                    <h4 className="text-sm font-medium text-zinc-900 truncate">{ing.name}</h4>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-zinc-500 font-mono">
+                    <h4 className="truncate text-sm font-medium text-foreground">{ing.name}</h4>
+                    <div className="mt-1 flex items-center gap-3">
+                      <span className="font-mono text-xs text-muted-foreground">
                         Cost: ₱{Number(ing.cost_per_unit).toFixed(2)}
                       </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                        isLowStock ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-zinc-100 text-zinc-600'
-                      }`}>
+                      <Badge
+                        variant={isLowStock ? 'destructive' : 'outline'}
+                        className={isLowStock ? '' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
+                      >
                         {ing.current_stock} remaining (Alert: {ing.min_stock_alert})
-                      </span>
+                      </Badge>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => startEdit(ing)}
-                      className="text-xs font-medium text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-2.5 py-1.5 rounded-md transition cursor-pointer"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(ing.id, ing.name)}
-                      className="text-xs font-medium text-red-500 hover:text-white hover:bg-red-600 px-2.5 py-1.5 rounded-md transition cursor-pointer"
-                    >
-                      Delete
-                    </button>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => startEdit(ing)}>Edit</Button>
+                    <Button type="button" variant="destructive" size="sm" onClick={() => handleDelete(ing.id, ing.name)}>Delete</Button>
                   </div>
                 </div>
               )
@@ -262,7 +248,6 @@ export default function IngredientsClient({ businessId, initialIngredients, onIn
           )}
         </div>
       </div>
-
-    </div>
+    </Card>
   )
 }

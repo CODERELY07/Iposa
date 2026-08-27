@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ProductCard from '@/components/marketplace/ProductCard'
+import { Store, PackageX } from 'lucide-react'
 import type { MarketplaceProduct } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -28,39 +29,42 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
 
   return (
     <div>
-      <div className="bg-white border-b border-zinc-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 flex items-center gap-5">
-          <div className="w-20 h-20 rounded-2xl bg-zinc-100 border border-zinc-200 flex items-center justify-center overflow-hidden shrink-0">
+      <div className="relative overflow-hidden border-b bg-hero-wash">
+        <div className="mx-auto flex max-w-310 items-center gap-5 px-4 py-10 sm:px-6">
+          <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-brand-soft shadow-card">
             {business.logo_url ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={business.logo_url} alt={business.name} className="w-full h-full object-cover" />
+              <img src={business.logo_url} alt={business.name} className="h-full w-full object-cover" />
             ) : (
-              <span className="text-3xl">🏪</span>
+              <Store className="size-8 text-primary/60" />
             )}
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-zinc-900">{business.name}</h1>
+            <h1 className="font-serif text-3xl font-normal tracking-tight text-foreground">{business.name}</h1>
             {business.description && (
-              <p className="text-sm text-zinc-500 mt-1 max-w-2xl">{business.description}</p>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{business.description}</p>
             )}
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <div className="mx-auto max-w-310 px-4 py-8 sm:px-6">
         {error && (
-          <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg p-4 mb-4">
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
             Failed to load products: {error.message}
           </div>
         )}
 
         {!error && (products ?? []).length === 0 && (
-          <div className="text-center py-16 text-sm text-zinc-400 border border-dashed border-zinc-200 rounded-xl bg-white">
-            This shop hasn&apos;t listed any products yet.
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card py-16 text-center">
+            <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-brand-soft">
+              <PackageX className="size-6 text-primary" />
+            </span>
+            <p className="text-sm text-muted-foreground">This shop hasn&apos;t listed any products yet.</p>
           </div>
         )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {(products as MarketplaceProduct[] ?? []).map(p => (
             <ProductCard key={p.id} product={p} />
           ))}
