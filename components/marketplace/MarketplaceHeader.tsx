@@ -79,7 +79,7 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
           <Sheet>
             <SheetTrigger
               render={
-                <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Toggle menu" />
+                <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Toggle menu" />
               }
             >
               <Menu />
@@ -106,13 +106,13 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary transition-transform group-hover:scale-105">
               <PackageSearch className="size-4.5" />
             </span>
-            <span className="truncate font-serif text-[25px] leading-none tracking-tight text-foreground">
+            <span className="truncate font-serif text-[21px] leading-none tracking-tight text-foreground lg:text-[23px] xl:text-[25px]">
               MElocalmarketplace
             </span>
           </Link>
         </div>
 
-        <nav className="hidden items-center gap-6 sm:flex">{navLinks}</nav>
+        <nav className="hidden items-center gap-5 lg:flex xl:gap-6">{navLinks}</nav>
 
         <div className="flex shrink-0 items-center gap-2">
           <Button

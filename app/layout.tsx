@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { DM_Sans, Instrument_Serif, IBM_Plex_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import RouteProgress from "@/components/ui/route-progress";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -62,6 +64,9 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>
       <body className="min-h-full flex flex-col">
+        <Suspense fallback={null}>
+          <RouteProgress />
+        </Suspense>
         <TooltipProvider delay={200}>
           {children}
           <Toaster richColors position="top-center" />

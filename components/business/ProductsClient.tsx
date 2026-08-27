@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
+import { toast } from 'sonner'
 import type { Ingredient, RecipeItem, StoreCategory, StoreProduct } from '@/lib/types/marketplace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +13,7 @@ import CategoryBadge from '@/components/marketplace/CategoryBadge'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import ConfirmDialog from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Plus, Search, PackageSearch, X } from 'lucide-react'
@@ -61,6 +63,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<StoreProduct | null>(null)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
 
@@ -197,13 +200,15 @@ export default function ProductsClient({ initialProducts, categories, ingredient
     })
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm(`Are you sure you want to delete this ${meta.catalogLabelSingular.toLowerCase()}?`)) return
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
     setDeleteId(id)
     try {
       await onDeleteAction(id)
+      setDeleteTarget(null)
     } catch (err) {
-      alert(`Delete operation failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      toast.error(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
       setDeleteId(null)
     }
@@ -311,7 +316,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                   <TableCell className="p-4 text-right">
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEdit(p)}>Edit</Button>
-                      <Button variant="destructive" size="icon-sm" onClick={() => handleDelete(p.id)} disabled={deleteId === p.id} aria-label={`Delete ${meta.catalogLabelSingular.toLowerCase()}`}>
+                      <Button variant="destructive" size="icon-sm" onClick={() => setDeleteTarget(p)} disabled={deleteId === p.id} aria-label={`Delete ${meta.catalogLabelSingular.toLowerCase()}`}>
                         <X />
                       </Button>
                     </div>
@@ -522,6 +527,16 @@ export default function ProductsClient({ initialProducts, categories, ingredient
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={open => !open && setDeleteTarget(null)}
+        title={`Delete ${deleteTarget?.name ?? 'this ' + meta.catalogLabelSingular.toLowerCase()}?`}
+        description="This can't be undone. It will disappear from your POS and, if listed, from your public marketplace shop."
+        confirmLabel="Delete"
+        loading={deleteId === deleteTarget?.id}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

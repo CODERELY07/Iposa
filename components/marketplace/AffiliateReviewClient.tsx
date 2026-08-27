@@ -81,7 +81,7 @@ export default function AffiliateReviewClient({ affiliates }: { affiliates: Affi
                   </Button>
                 </div>
                 {rejectingId === a.id && (
-                  <div className="flex w-64 items-start gap-2">
+                  <div className="flex w-full max-w-64 items-start gap-2">
                     <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (optional)" className="flex-1 text-xs" />
                     <Button size="sm" variant="destructive" disabled={isPending && busyId === a.id} onClick={() => reject(a.id)}>
                       Confirm

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import ConfirmDialog from '@/components/ui/confirm-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Plus, Tag } from 'lucide-react'
 
@@ -31,6 +32,7 @@ export default function CategoriesClient({ initialCategories, canEditDelete }: P
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<StoreCategory | null>(null)
 
   function openCreate() {
     setEditing(null)
@@ -83,10 +85,15 @@ export default function CategoriesClient({ initialCategories, canEditDelete }: P
     closeModal()
   }
 
-  async function handleDelete(id: number) {
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
     setDeleteId(id)
     const { error } = await supabase.from('categories').delete().eq('id', id)
-    if (!error) setCategories(prev => prev.filter(c => c.id !== id))
+    if (!error) {
+      setCategories(prev => prev.filter(c => c.id !== id))
+      setDeleteTarget(null)
+    }
     setDeleteId(null)
   }
 
@@ -133,7 +140,7 @@ export default function CategoriesClient({ initialCategories, canEditDelete }: P
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => handleDelete(cat.id)}
+                          onClick={() => setDeleteTarget(cat)}
                           disabled={deleteId === cat.id}
                         >
                           {deleteId === cat.id ? '…' : 'Delete'}
@@ -185,6 +192,16 @@ export default function CategoriesClient({ initialCategories, canEditDelete }: P
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={open => !open && setDeleteTarget(null)}
+        title={`Delete "${deleteTarget?.name ?? ''}"?`}
+        description="This category is shared across the whole marketplace — deleting it will leave any product still assigned to it uncategorized."
+        confirmLabel="Delete"
+        loading={deleteId === deleteTarget?.id}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

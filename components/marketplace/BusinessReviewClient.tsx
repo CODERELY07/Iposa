@@ -119,7 +119,7 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
                   </Button>
                 </div>
                 {rejectingId === b.id && (
-                  <div className="flex w-64 items-start gap-2">
+                  <div className="flex w-full max-w-64 items-start gap-2">
                     <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (optional)" className="flex-1 text-xs" />
                     <Button size="sm" variant="destructive" disabled={isPending && busyId === b.id} onClick={() => reject(b.id)}>
                       Confirm

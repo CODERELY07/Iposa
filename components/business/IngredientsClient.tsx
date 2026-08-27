@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import ConfirmDialog from '@/components/ui/confirm-dialog'
 import { AlertCircle, Soup } from 'lucide-react'
 import type { BusinessTypeMeta } from '@/lib/business/type-meta'
 import { UNIT_TYPES, unitLabel, type UnitType } from '@/lib/business/units'
@@ -42,10 +43,38 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Ingredient | null>(null)
+
+  // Cost-per-unit calculator: the user knows what they paid and how much
+  // they got, not the per-unit rate — so the form derives that division for
+  // them instead of asking them to do the math. Left blank, the manual
+  // "Cost Per Unit" field below still works exactly as before (e.g. keying
+  // in a supplier's already-quoted per-unit price).
+  const [purchaseTotal, setPurchaseTotal] = useState('')
+  const [purchaseQty, setPurchaseQty] = useState('')
+
+  const parsedPurchaseTotal = parseFloat(purchaseTotal)
+  const parsedPurchaseQty = parseFloat(purchaseQty)
+  const hasCalculator =
+    purchaseTotal.trim() !== '' &&
+    purchaseQty.trim() !== '' &&
+    Number.isFinite(parsedPurchaseTotal) &&
+    Number.isFinite(parsedPurchaseQty) &&
+    parsedPurchaseQty > 0
+  const calculatedCostPerUnit = hasCalculator ? parsedPurchaseTotal / parsedPurchaseQty : null
+  // Trim trailing zeros so e.g. 0.180000 displays as 0.18, but keep enough
+  // precision that a bulk ingredient's real per-unit cost doesn't round away.
+  const calculatedCostDisplay =
+    calculatedCostPerUnit !== null
+      ? calculatedCostPerUnit.toFixed(6).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+      : ''
+  const effectiveCostPerUnit = hasCalculator ? calculatedCostDisplay : formData.cost_per_unit
 
   const resetForm = () => {
     setFormData({ name: '', unit_type: 'grams', current_stock: '', min_stock_alert: '', cost_per_unit: '' })
     setEditingId(null)
+    setPurchaseTotal('')
+    setPurchaseQty('')
   }
 
   const startEdit = (ing: Ingredient) => {
@@ -57,6 +86,10 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
       min_stock_alert: String(ing.min_stock_alert),
       cost_per_unit: String(ing.cost_per_unit)
     })
+    // The calculator has no memory of the original purchase — clear it so
+    // editing doesn't silently overwrite a manually-set cost.
+    setPurchaseTotal('')
+    setPurchaseQty('')
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -69,7 +102,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
       unit_type: formData.unit_type,
       current_stock: Number(formData.current_stock || 0),
       min_stock_alert: Number(formData.min_stock_alert || 0),
-      cost_per_unit: Number(formData.cost_per_unit || 0)
+      cost_per_unit: Number(effectiveCostPerUnit || 0)
     }
 
     if (editingId) {
@@ -105,9 +138,9 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
     if (onIngredientsChanged) onIngredientsChanged()
   }
 
-  async function handleDelete(id: number, name: string) {
-    const confirmed = window.confirm(`Are you sure you want to permanently delete "${name}"? This will cause ${materialMeta.recipeLabel.toLowerCase()} calculation discrepancies if it's attached to products.`)
-    if (!confirmed) return
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    const id = deleteTarget.id
 
     setLoading(true)
     setError(null)
@@ -123,6 +156,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
       setIngredients(prev => prev.filter(i => i.id !== id))
       toast.success('Ingredient removed.')
       if (editingId === id) resetForm()
+      setDeleteTarget(null)
     }
     setLoading(false)
     if (onIngredientsChanged) onIngredientsChanged()
@@ -204,9 +238,49 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
             </div>
           </div>
 
+          <div className="space-y-2 rounded-xl border bg-muted/40 p-3">
+            <Label className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">
+              Cost calculator
+            </Label>
+            <p className="text-[10px] text-muted-foreground">
+              Enter what you paid and how much you got — the per-{unitLabel(formData.unit_type)} cost below is worked out for you.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="ing-purchase-total" className="text-[10px] font-medium uppercase text-muted-foreground">Amount paid (₱)</Label>
+                <Input
+                  id="ing-purchase-total"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g., 180"
+                  value={purchaseTotal}
+                  onChange={e => setPurchaseTotal(e.target.value)}
+                  className="bg-background font-mono"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ing-purchase-qty" className="text-[10px] font-medium uppercase text-muted-foreground">
+                  Quantity received ({unitLabel(formData.unit_type)})
+                </Label>
+                <Input
+                  id="ing-purchase-qty"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g., 1000"
+                  value={purchaseQty}
+                  onChange={e => setPurchaseQty(e.target.value)}
+                  className="bg-background font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-1">
             <Label htmlFor="ing-cost" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">
               Cost Per {unitLabel(formData.unit_type)} (₱)
+              {hasCalculator && <span className="ml-1 text-[10px] normal-case tracking-normal text-primary">(calculated automatically)</span>}
             </Label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">₱</span>
@@ -216,14 +290,17 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
                 step="0.0001"
                 min="0"
                 required
+                readOnly={hasCalculator}
                 placeholder="0.0000"
-                value={formData.cost_per_unit}
+                value={hasCalculator ? calculatedCostDisplay : formData.cost_per_unit}
                 onChange={e => setFormData(prev => ({ ...prev, cost_per_unit: e.target.value }))}
-                className="bg-background pl-6 font-mono"
+                className={`bg-background pl-6 font-mono ${hasCalculator ? 'font-bold text-primary' : ''}`}
               />
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Divide what you paid by how many {unitLabel(formData.unit_type)} it made — e.g. a ₱180 1-liter bottle of oil is ₱0.18 per ml. Small per-unit costs need the decimals: rounding to centavos here silently drops most of a bulk ingredient&apos;s real cost from every recipe that uses it.
+              {hasCalculator
+                ? `₱${purchaseTotal} ÷ ${purchaseQty} ${unitLabel(formData.unit_type)} = ₱${calculatedCostDisplay} per ${unitLabel(formData.unit_type)}.`
+                : `Fill in the calculator above, or type a known per-${unitLabel(formData.unit_type)} cost here directly. Small per-unit costs need the decimals — rounding to centavos silently drops most of a bulk ingredient's real cost from every recipe that uses it.`}
             </p>
           </div>
 
@@ -282,7 +359,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
 
                   <div className="flex items-center gap-1">
                     <Button type="button" variant="secondary" size="sm" onClick={() => startEdit(ing)}>Edit</Button>
-                    <Button type="button" variant="destructive" size="sm" onClick={() => handleDelete(ing.id, ing.name)}>Delete</Button>
+                    <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget(ing)}>Delete</Button>
                   </div>
                 </div>
               )
@@ -290,6 +367,16 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={open => !open && setDeleteTarget(null)}
+        title={`Delete "${deleteTarget?.name ?? ''}"?`}
+        description={`This can't be undone. It will cause ${materialMeta.recipeLabel.toLowerCase()} calculation discrepancies for any product still using it in a recipe.`}
+        confirmLabel="Delete"
+        loading={loading}
+        onConfirm={confirmDelete}
+      />
     </Card>
   )
 }

@@ -92,7 +92,7 @@ export default function CartPage() {
         </Card>
       ))}
 
-      <Card className="flex flex-row items-center justify-between bg-gradient-brand-soft p-4">
+      <Card className="flex flex-col items-stretch gap-3 bg-gradient-brand-soft p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           {groupedByBusiness.length > 1 && (
             <Badge variant="secondary" className="mb-1">
@@ -101,7 +101,7 @@ export default function CartPage() {
           )}
           <p className="font-mono text-xl font-bold text-foreground">₱{totalPrice.toFixed(2)}</p>
         </div>
-        <Button size="lg" render={<Link href="/checkout" />}>Checkout</Button>
+        <Button size="lg" className="w-full sm:w-auto" render={<Link href="/checkout" />}>Checkout</Button>
       </Card>
     </div>
   )
