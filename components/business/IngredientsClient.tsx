@@ -10,8 +10,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertCircle, Soup } from 'lucide-react'
 import type { BusinessTypeMeta } from '@/lib/business/type-meta'
+import { UNIT_TYPES, unitLabel, type UnitType } from '@/lib/business/units'
 
 type Props = {
   businessId: string
@@ -32,6 +34,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
   const [editingId, setEditingId] = useState<number | null>(null)
   const [formData, setFormData] = useState({
     name: '',
+    unit_type: 'grams' as UnitType,
     current_stock: '',
     min_stock_alert: '',
     cost_per_unit: ''
@@ -41,7 +44,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
   const [error, setError] = useState<string | null>(null)
 
   const resetForm = () => {
-    setFormData({ name: '', current_stock: '', min_stock_alert: '', cost_per_unit: '' })
+    setFormData({ name: '', unit_type: 'grams', current_stock: '', min_stock_alert: '', cost_per_unit: '' })
     setEditingId(null)
   }
 
@@ -49,6 +52,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
     setEditingId(ing.id)
     setFormData({
       name: ing.name,
+      unit_type: (ing.unit_type as UnitType) || 'grams',
       current_stock: String(ing.current_stock),
       min_stock_alert: String(ing.min_stock_alert),
       cost_per_unit: String(ing.cost_per_unit)
@@ -62,6 +66,7 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
 
     const payload = {
       name: formData.name,
+      unit_type: formData.unit_type,
       current_stock: Number(formData.current_stock || 0),
       min_stock_alert: Number(formData.min_stock_alert || 0),
       cost_per_unit: Number(formData.cost_per_unit || 0)
@@ -146,13 +151,34 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
             />
           </div>
 
+          <div className="space-y-1">
+            <Label htmlFor="ing-unit" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Measured In</Label>
+            <Select
+              value={formData.unit_type}
+              onValueChange={v => setFormData(prev => ({ ...prev, unit_type: v as UnitType }))}
+            >
+              <SelectTrigger id="ing-unit" className="w-full bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {UNIT_TYPES.map(u => (
+                  <SelectItem key={u.value} value={u.value}>{u.label} ({u.shortLabel})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">
+              A liquid (oil, syrup, sauce) is Milliliters; a dry/weighed ingredient (flour, meat, rice) is Grams. Stock, alert threshold, and cost below are all in this unit — keep every recipe quantity for this {singular.toLowerCase()} in the same unit or its cost will be wrong.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label htmlFor="ing-stock" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Current Stock</Label>
+              <Label htmlFor="ing-stock" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">
+                Current Stock ({unitLabel(formData.unit_type)})
+              </Label>
               <Input
                 id="ing-stock"
                 type="number"
                 step="0.01"
+                min="0"
                 required
                 placeholder="0"
                 value={formData.current_stock}
@@ -161,11 +187,14 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ing-alert" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Alert Threshold</Label>
+              <Label htmlFor="ing-alert" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">
+                Alert Threshold ({unitLabel(formData.unit_type)})
+              </Label>
               <Input
                 id="ing-alert"
                 type="number"
                 step="0.01"
+                min="0"
                 required
                 placeholder="10"
                 value={formData.min_stock_alert}
@@ -176,20 +205,26 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
           </div>
 
           <div className="space-y-1">
-            <Label htmlFor="ing-cost" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">Cost Per Unit (₱)</Label>
+            <Label htmlFor="ing-cost" className="text-[11px] font-medium font-mono uppercase tracking-wider text-muted-foreground">
+              Cost Per {unitLabel(formData.unit_type)} (₱)
+            </Label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground">₱</span>
               <Input
                 id="ing-cost"
                 type="number"
-                step="0.01"
+                step="0.0001"
+                min="0"
                 required
-                placeholder="0.00"
+                placeholder="0.0000"
                 value={formData.cost_per_unit}
                 onChange={e => setFormData(prev => ({ ...prev, cost_per_unit: e.target.value }))}
                 className="bg-background pl-6 font-mono"
               />
             </div>
+            <p className="text-[10px] text-muted-foreground">
+              Divide what you paid by how many {unitLabel(formData.unit_type)} it made — e.g. a ₱180 1-liter bottle of oil is ₱0.18 per ml. Small per-unit costs need the decimals: rounding to centavos here silently drops most of a bulk ingredient&apos;s real cost from every recipe that uses it.
+            </p>
           </div>
 
           <div className="flex gap-2 pt-2">
@@ -232,15 +267,15 @@ export default function IngredientsClient({ businessId, initialIngredients, mate
                 <div key={ing.id} className="flex items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/40">
                   <div className="min-w-0 flex-1">
                     <h4 className="truncate text-sm font-medium text-foreground">{ing.name}</h4>
-                    <div className="mt-1 flex items-center gap-3">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="font-mono text-xs text-muted-foreground">
-                        Cost: ₱{Number(ing.cost_per_unit).toFixed(2)}
+                        Cost: ₱{Number(ing.cost_per_unit).toFixed(4)} / {unitLabel(ing.unit_type)}
                       </span>
                       <Badge
                         variant={isLowStock ? 'destructive' : 'outline'}
                         className={isLowStock ? '' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'}
                       >
-                        {ing.current_stock} remaining (Alert: {ing.min_stock_alert})
+                        {ing.current_stock} {unitLabel(ing.unit_type)} remaining (Alert: {ing.min_stock_alert})
                       </Badge>
                     </div>
                   </div>

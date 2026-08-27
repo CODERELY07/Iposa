@@ -15,7 +15,7 @@ export default async function MarketplaceLayout({ children }: { children: React.
       <div className="flex min-h-screen flex-col bg-background">
         <MarketplaceHeader userEmail={user?.email ?? null} role={role} />
         <main className="flex-1">{children}</main>
-        <MarketplaceFooter />
+        <MarketplaceFooter userEmail={user?.email ?? null} />
       </div>
     </CartProvider>
   )

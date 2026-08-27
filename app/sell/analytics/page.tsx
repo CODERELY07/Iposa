@@ -26,7 +26,7 @@ export default async function SellAnalyticsPage() {
       .select('quantity, selling_price, product_id, custom_name, computed_cogs, sales!inner(created_at, business_id), store_products(name, cost_price, category_id)')
       .eq('sales.business_id', business.id),
     supabase.from('operating_expenses').select('amount').eq('business_id', business.id).gte('billing_period', startOfMonth),
-    supabase.from('ingredients').select('id, name, current_stock, min_stock_alert, cost_per_unit').eq('business_id', business.id),
+    supabase.from('ingredients').select('id, name, current_stock, min_stock_alert, cost_per_unit, unit_type').eq('business_id', business.id),
     supabase.from('store_products').select('id, name, category_id, categories(name), recipes(ingredient_id, quantity_used)').eq('business_id', business.id)
   ])
 
@@ -58,14 +58,28 @@ export default async function SellAnalyticsPage() {
   }
 
   const productCostMap: Record<number, number> = {}
+  // Whether the product has any recipe row at all — the correct switch
+  // between "cost from ingredients" and "cost from cost_price" (mirrors the
+  // SQL's COALESCE(SUM(...), cost_price) in process_sale(), which falls
+  // back on an empty recipe, not on a recipe that happens to compute to 0).
+  // A recipe of free/zero-cost ingredients is a real, valid recipe cost of
+  // ₱0 — it must not fall through to cost_price, which is itself hardcoded
+  // to 0 for every recipe-based product (see saveProductAction), so that
+  // mistake would silently agree with itself here instead of surfacing.
+  const productHasRecipeMap: Record<number, boolean> = {}
   const productCategoryNameMap: Record<number, string> = {}
 
   productsRaw.forEach(p => {
     const catName = (p.categories as unknown as { name: string } | null)?.name ?? 'Uncategorized'
     productCategoryNameMap[p.id] = catName
 
-    const hasRecipe = p.recipes && p.recipes.length > 0
+    const hasRecipe = Boolean(p.recipes && p.recipes.length > 0)
+    productHasRecipeMap[p.id] = hasRecipe
     if (hasRecipe && p.recipes) {
+      // Ingredient cost is looked up live from ingredientsRaw (not the
+      // quantity_used snapshot alone), so a price change on an ingredient
+      // is reflected retroactively across this month's past sales too, not
+      // just future ones — same intent as the comment below on cost.
       const computedRecipeCost = p.recipes.reduce((sum, r) => {
         const ing = ingredientsRaw.find(i => i.id === r.ingredient_id)
         return sum + (Number(ing?.cost_per_unit ?? 0) * Number(r.quantity_used))
@@ -103,8 +117,9 @@ export default async function SellAnalyticsPage() {
     // computed_cogs process_sale() already stored for that exact line.
     let calculatedItemTotalCogs: number
     if (productId) {
-      const recipeCost = productCostMap[productId] ?? 0
-      const finalUnitCogs = recipeCost > 0 ? recipeCost : Number(prod?.cost_price || 0)
+      const finalUnitCogs = productHasRecipeMap[productId]
+        ? (productCostMap[productId] ?? 0)
+        : Number(prod?.cost_price || 0)
       calculatedItemTotalCogs = finalUnitCogs * qty
     } else {
       calculatedItemTotalCogs = Number(item.computed_cogs || 0)
@@ -155,7 +170,8 @@ export default async function SellAnalyticsPage() {
     .map(ing => ({
       name: ing.name,
       current_stock: Number(ing.current_stock),
-      min_stock_alert: Number(ing.min_stock_alert)
+      min_stock_alert: Number(ing.min_stock_alert),
+      unit_type: ing.unit_type
     }))
 
   return (
@@ -165,7 +181,7 @@ export default async function SellAnalyticsPage() {
       topProducts={topProducts}
       categoryShares={categoryShares}
       lowStockIngredients={lowStockIngredients}
-      ingredientsCostList={ingredientsRaw.map(i => ({ name: i.name, cost: Number(i.cost_per_unit || 0) }))}
+      ingredientsCostList={ingredientsRaw.map(i => ({ name: i.name, cost: Number(i.cost_per_unit || 0), unit_type: i.unit_type }))}
       kpis={{
         grossRevenue,
         totalCOGS,

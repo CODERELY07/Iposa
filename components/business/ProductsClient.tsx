@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Plus, Search, PackageSearch, X } from 'lucide-react'
 import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import { unitLabel } from '@/lib/business/units'
 import type { BusinessType } from '@/lib/types/marketplace'
 
 type Props = {
@@ -51,10 +52,6 @@ const EMPTY_FORM = {
 }
 
 const NO_CATEGORY = '__none__'
-
-function unitLabel(unitType: string) {
-  return unitType === 'pieces' ? 'pcs' : unitType === 'grams' ? 'g' : 'ml'
-}
 
 export default function ProductsClient({ initialProducts, categories, ingredients, businessType, onSaveAction, onDeleteAction }: Props) {
   const meta = getBusinessTypeMeta(businessType)

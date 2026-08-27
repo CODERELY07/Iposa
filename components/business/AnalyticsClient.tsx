@@ -18,6 +18,7 @@ import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { CheckCircle2 } from 'lucide-react'
 import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import { unitLabel } from '@/lib/business/units'
 import type { BusinessType } from '@/lib/types/marketplace'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler)
@@ -30,8 +31,8 @@ type Props = {
   salesRaw: { total: number; created_at: string }[]
   topProducts: { name: string; qty: number; revenue: number; profit: number }[]
   categoryShares: { name: string; value: number }[]
-  lowStockIngredients: { name: string; current_stock: number; min_stock_alert: number }[]
-  ingredientsCostList: { name: string; cost: number }[]
+  lowStockIngredients: { name: string; current_stock: number; min_stock_alert: number; unit_type: string }[]
+  ingredientsCostList: { name: string; cost: number; unit_type: string }[]
   kpis: {
     grossRevenue: number
     totalCOGS: number
@@ -217,7 +218,7 @@ export default function AnalyticsClient({ businessType, salesRaw, topProducts, c
                   <div key={idx} className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50/50 p-2.5 text-xs dark:border-red-900 dark:bg-red-950/40">
                     <span className="font-bold text-foreground">{ing.name}</span>
                     <span className="rounded border border-red-100 bg-background px-2 py-0.5 font-mono font-bold text-red-600 dark:border-red-900 dark:text-red-400">
-                      {ing.current_stock} remaining (Alert @ {ing.min_stock_alert})
+                      {ing.current_stock} {unitLabel(ing.unit_type)} remaining (Alert @ {ing.min_stock_alert})
                     </span>
                   </div>
                 ))
@@ -231,7 +232,7 @@ export default function AnalyticsClient({ businessType, salesRaw, topProducts, c
               {ingredientsCostList.map((ing, idx) => (
                 <div key={idx} className="flex justify-between rounded p-2 transition-colors hover:bg-muted/50">
                   <span className="text-foreground">{ing.name}</span>
-                  <span className="font-mono font-bold text-foreground">₱{ing.cost.toFixed(4)} / unit</span>
+                  <span className="font-mono font-bold text-foreground">₱{ing.cost.toFixed(4)} / {unitLabel(ing.unit_type)}</span>
                 </div>
               ))}
             </div>

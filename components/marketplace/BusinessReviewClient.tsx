@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import { reviewBusinessAction } from '@/app/admin/businesses/actions'
-import type { Business } from '@/lib/types/marketplace'
+import { reviewBusinessAction, changeBusinessTypeAction } from '@/app/admin/businesses/actions'
+import type { Business, BusinessType } from '@/lib/types/marketplace'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApplicationStatusBadge } from '@/components/marketplace/StatusBadge'
-import { getBusinessTypeMeta } from '@/lib/business/type-meta'
+import { BUSINESS_TYPE_OPTIONS, getBusinessTypeMeta } from '@/lib/business/type-meta'
 import { Store } from 'lucide-react'
 
 export default function BusinessReviewClient({ businesses }: { businesses: Business[] }) {
@@ -16,6 +17,11 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  // Local optimistic override so the select reflects a just-saved change
+  // immediately, keyed by business id — the list itself only refreshes via
+  // revalidatePath on the next navigation.
+  const [typeOverrides, setTypeOverrides] = useState<Record<string, BusinessType>>({})
+  const [pendingTypeId, setPendingTypeId] = useState<string | null>(null)
 
   function approve(id: string) {
     setBusyId(id)
@@ -37,6 +43,21 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
     })
   }
 
+  function changeType(business: Business, type: BusinessType) {
+    if (type === (typeOverrides[business.id] ?? business.business_type)) return
+    setPendingTypeId(business.id)
+    startTransition(async () => {
+      const result = await changeBusinessTypeAction(business.id, type)
+      if (!result.success) {
+        toast.error(result.message)
+      } else {
+        setTypeOverrides(prev => ({ ...prev, [business.id]: type }))
+        toast.success(`${business.name} switched to ${getBusinessTypeMeta(type).shortLabel}.`)
+      }
+      setPendingTypeId(null)
+    })
+  }
+
   return (
     <div className="space-y-4">
       {businesses.length === 0 && (
@@ -48,16 +69,16 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
         </div>
       )}
 
-      {businesses.map(b => (
+      {businesses.map(b => {
+        const currentType = typeOverrides[b.id] ?? b.business_type
+
+        return (
         <Card key={b.id} className="p-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-bold text-foreground">{b.name}</h3>
                 <ApplicationStatusBadge status={b.status} />
-                <span className="label-mono rounded-full bg-gradient-brand-soft px-2 py-0.5 text-primary">
-                  {getBusinessTypeMeta(b.business_type).shortLabel}
-                </span>
               </div>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">/{b.slug}</p>
               {b.description && <p className="mt-2 max-w-xl text-sm text-foreground">{b.description}</p>}
@@ -67,6 +88,24 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
               <p className="mt-2 text-[11px] text-muted-foreground">
                 Submitted {new Date(b.created_at).toLocaleString()}
               </p>
+
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-muted-foreground">Business type</span>
+                <Select
+                  value={currentType}
+                  onValueChange={v => changeType(b, v as BusinessType)}
+                  disabled={isPending && pendingTypeId === b.id}
+                >
+                  <SelectTrigger size="sm" className="w-44 bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BUSINESS_TYPE_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.shortLabel}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {b.status === 'pending' && (
@@ -91,7 +130,8 @@ export default function BusinessReviewClient({ businesses }: { businesses: Busin
             )}
           </div>
         </Card>
-      ))}
+        )
+      })}
     </div>
   )
 }

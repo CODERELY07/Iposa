@@ -395,9 +395,18 @@ BEGIN
     FROM public.recipes r
     WHERE r.ingredient_id = i.id AND r.product_id = OLD.product_id;
   ELSE
+    -- Mirrors process_sale()'s own decrement condition exactly
+    -- (`p.track_stock AND NOT EXISTS(recipes)`, checked above) — an
+    -- untracked service (track_stock = false, see
+    -- store_products.track_stock) was never decremented at sale time, so
+    -- voiding its sale must not add quantity back onto its stock column
+    -- either. Without this check a voided service sale would leave a
+    -- phantom nonzero stock value on a product that's supposed to always
+    -- read as 0/unused.
     UPDATE public.store_products
     SET stock = stock + OLD.quantity
-    WHERE id = OLD.product_id;
+    WHERE id = OLD.product_id
+      AND track_stock;
   END IF;
 
   RETURN OLD;
@@ -458,7 +467,18 @@ SELECT
   sp.description,
   sp.image_url,
   sp.price,
-  sp.stock,
+  -- A recipe-based product's own `stock` column is hardcoded to 0 by
+  -- convention (see saveProductAction in app/sell/products/actions.ts) —
+  -- its real sellable count is derived live from ingredient supply instead,
+  -- the same computation place_order()/process_sale()/POS/the seller's own
+  -- Products page all already use. Without this, every recipe-based dish
+  -- (any restaurant menu item with a recipe attached) would read as
+  -- permanently out of stock to shoppers — and have Add to Cart/Buy Now
+  -- disabled on its product page — even with fully stocked ingredients.
+  -- recipe_stock.available is NULL for a product with no recipe rows
+  -- (aggregates over zero rows), so COALESCE leaves standalone/retail/
+  -- service products exactly as before.
+  COALESCE(recipe_stock.available, sp.stock) AS stock,
   sp.track_stock,
   sp.category_id,
   c.name AS category_name,
@@ -471,6 +491,14 @@ SELECT
 FROM public.store_products sp
 JOIN public.businesses b ON b.id = sp.business_id AND b.status = 'approved'
 LEFT JOIN public.categories c ON c.id = sp.category_id
+LEFT JOIN LATERAL (
+  SELECT FLOOR(MIN(
+    CASE WHEN r.quantity_used > 0 THEN i.current_stock / r.quantity_used ELSE 0 END
+  ))::integer AS available
+  FROM public.recipes r
+  JOIN public.ingredients i ON i.id = r.ingredient_id
+  WHERE r.product_id = sp.id
+) recipe_stock ON true
 WHERE sp.is_active = true;
 
 GRANT SELECT ON public.marketplace_products TO anon, authenticated;
@@ -576,6 +604,59 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.set_business_status(uuid, text, text) TO authenticated;
+
+-- A super_admin corrects a business's type after registration (see
+-- protect_business_type() above — an owner cannot do this themselves once
+-- registered). Reconciles every existing store_products row's track_stock
+-- to match the new type (see lib/business/type-meta.ts's tracksStock),
+-- since that flag is what POS/checkout actually key off of and would
+-- otherwise silently disagree with the business's new type. A row moved
+-- into a type that doesn't track stock also has its stock zeroed, matching
+-- what saveProductAction() already does for every new/edited row on such a
+-- business. Pre-existing ingredients/recipes rows are left untouched either
+-- way — they just become inert (hidden from nav) rather than deleted, so a
+-- mis-set type can be corrected again without losing data.
+CREATE OR REPLACE FUNCTION public.set_business_type(p_business_id uuid, p_business_type text)
+RETURNS public.businesses
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_business public.businesses;
+  v_tracks_stock boolean;
+BEGIN
+  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can change a business''s type';
+  END IF;
+
+  IF p_business_type NOT IN ('restaurant', 'services', 'retail') THEN
+    RAISE EXCEPTION 'Invalid business type: %', p_business_type;
+  END IF;
+
+  -- Mirrors BUSINESS_TYPE_META[type].tracksStock in lib/business/type-meta.ts.
+  v_tracks_stock := p_business_type <> 'services';
+
+  UPDATE public.businesses
+  SET business_type = p_business_type
+  WHERE id = p_business_id
+  RETURNING * INTO v_business;
+
+  IF v_business IS NULL THEN
+    RAISE EXCEPTION 'Business not found';
+  END IF;
+
+  UPDATE public.store_products
+  SET track_stock = v_tracks_stock,
+      stock = CASE WHEN v_tracks_stock THEN stock ELSE 0 END
+  WHERE business_id = p_business_id
+    AND track_stock IS DISTINCT FROM v_tracks_stock;
+
+  RETURN v_business;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.set_business_type(uuid, text) TO authenticated;
 
 -- A customer checks out on the marketplace. Splits the cart by business
 -- (one order per shop), validates stock/availability, and decrements stock

@@ -1,7 +1,12 @@
 import Link from 'next/link'
 import { PackageSearch } from 'lucide-react'
+import SignOutButton from '@/components/auth/SignOutButton'
 
-export default function MarketplaceFooter() {
+type Props = {
+  userEmail: string | null
+}
+
+export default function MarketplaceFooter({ userEmail }: Props) {
   return (
     <footer className="mt-auto border-t bg-card">
       <div className="h-0.5 w-full bg-gradient-brand" />
@@ -38,8 +43,18 @@ export default function MarketplaceFooter() {
         <div>
           <p className="label-mono">Account</p>
           <div className="mt-3 flex flex-col gap-2 text-sm">
-            <Link href="/login" className="text-muted-foreground transition-colors hover:text-foreground">Sign in</Link>
-            <Link href="/signup" className="text-muted-foreground transition-colors hover:text-foreground">Create account</Link>
+            {userEmail ? (
+              <>
+                <span className="max-w-full truncate text-muted-foreground" title={userEmail}>{userEmail}</span>
+                <Link href="/orders" className="text-muted-foreground transition-colors hover:text-foreground">My orders</Link>
+                <SignOutButton className="w-fit text-left text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50" />
+              </>
+            ) : (
+              <>
+                <Link href="/login" className="text-muted-foreground transition-colors hover:text-foreground">Sign in</Link>
+                <Link href="/signup" className="text-muted-foreground transition-colors hover:text-foreground">Create account</Link>
+              </>
+            )}
           </div>
         </div>
       </div>

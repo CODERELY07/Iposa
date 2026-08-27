@@ -26,7 +26,7 @@ export default function NotFound() {
         <Separator className="my-6" />
 
         <p className="text-sm text-muted-foreground">
-          Need help? <Link href="/" className="text-primary hover:underline">Contact support</Link>
+          Double-check the link, or <Link href="/" className="text-primary hover:underline">browse the marketplace</Link> instead.
         </p>
       </Card>
     </div>

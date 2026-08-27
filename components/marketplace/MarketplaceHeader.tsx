@@ -14,6 +14,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -140,7 +141,15 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
                 </Avatar>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel className="max-w-48 truncate font-normal text-foreground">{userEmail}</DropdownMenuLabel>
+                {/* Base UI's Menu.GroupLabel (what DropdownMenuLabel wraps —
+                    see components/ui/dropdown-menu.tsx) throws if it isn't a
+                    descendant of Menu.Group: it registers its id with the
+                    group's context to wire up aria-labelledby. Unlike Radix,
+                    which this component was ported from, a standalone label
+                    isn't supported. */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="max-w-48 truncate font-normal text-foreground">{userEmail}</DropdownMenuLabel>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 {roleLink && (
                   <DropdownMenuItem render={<Link href={roleLink.href} />}>

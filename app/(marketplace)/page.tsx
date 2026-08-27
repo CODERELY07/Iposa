@@ -108,6 +108,7 @@ export default async function MarketplaceHomePage({
 
             <form action="/#browse" method="get" className="mt-6.5 flex max-w-115 gap-2.5">
               <Input
+                key={params.q ?? ''}
                 type="text"
                 name="q"
                 defaultValue={params.q ?? ''}
@@ -190,7 +191,7 @@ export default async function MarketplaceHomePage({
           <form className="grid grid-cols-2 items-end gap-2.5 sm:grid-cols-[1.6fr_1fr_1fr_0.8fr_0.8fr_auto]">
             <div className="col-span-2 space-y-1.5 sm:col-span-1">
               <label className="label-mono block">Search</label>
-              <Input type="text" name="q" defaultValue={params.q ?? ''} placeholder="Product name…" className="h-9.5 text-sm" />
+              <Input key={params.q ?? ''} type="text" name="q" defaultValue={params.q ?? ''} placeholder="Product name…" className="h-9.5 text-sm" />
             </div>
 
             <div className="space-y-1.5">
@@ -215,12 +216,12 @@ export default async function MarketplaceHomePage({
 
             <div className="space-y-1.5">
               <label className="label-mono block">Min ₱</label>
-              <Input type="number" min="0" step="0.01" name="min_price" defaultValue={params.min_price ?? ''} placeholder="0" className="h-9.5 text-sm" />
+              <Input key={params.min_price ?? ''} type="number" min="0" step="0.01" name="min_price" defaultValue={params.min_price ?? ''} placeholder="0" className="h-9.5 text-sm" />
             </div>
 
             <div className="space-y-1.5">
               <label className="label-mono block">Max ₱</label>
-              <Input type="number" min="0" step="0.01" name="max_price" defaultValue={params.max_price ?? ''} placeholder="Any" className="h-9.5 text-sm" />
+              <Input key={params.max_price ?? ''} type="number" min="0" step="0.01" name="max_price" defaultValue={params.max_price ?? ''} placeholder="Any" className="h-9.5 text-sm" />
             </div>
 
             <div className="flex gap-1.5">

@@ -3,6 +3,7 @@ import { requireBusinessAccount, createClient } from '@/lib/supabase/server'
 import { Card, CardContent } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import {
   AlertCircle,
   Clock,
@@ -12,6 +13,7 @@ import {
   AlertTriangle,
   TrendingUp,
   PartyPopper,
+  CheckCircle2,
 } from 'lucide-react'
 
 export const revalidate = 0
@@ -58,6 +60,7 @@ export default async function SellDashboardPage() {
   }
 
   const supabase = await createClient()
+  const meta = getBusinessTypeMeta(business.business_type)
 
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
@@ -67,7 +70,7 @@ export default async function SellDashboardPage() {
     { count: productCount },
     { count: pendingOrderCount },
     { data: salesToday, error: salesErr },
-    { data: lowStockProducts, error: stockErr },
+    { data: stockCandidates, error: stockErr },
     { data: topSellingItems, error: itemsErr },
   ] = await Promise.all([
     supabase.from('store_products').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
@@ -78,17 +81,19 @@ export default async function SellDashboardPage() {
       .eq('status', 'pending'),
     // In-person POS sales recorded today
     supabase.from('sales').select('total').eq('business_id', business.id).gte('created_at', todayISO),
-    // Products running low (under 10 units), standalone stock only — recipe-based
-    // products derive live stock from ingredients instead (see Products/Analytics),
-    // and untracked rows (services — always available) never count as "low stock".
+    // Candidates for "running low" (under 10 units): every row with
+    // track_stock set, whether or not it's recipe-based — recipe-based rows
+    // are filtered out below in JS, same as Products/Analytics/POS do,
+    // because their `stock` column is hardcoded to 0 by convention (real
+    // availability is derived from ingredient supply, not this column).
+    // Untracked rows (services — see lib/business/type-meta.ts) never come
+    // back at all since track_stock is false business-wide for that type.
     supabase
       .from('store_products')
-      .select('id, name, sku, stock')
+      .select('id, name, sku, stock, recipes(product_id)')
       .eq('business_id', business.id)
       .eq('track_stock', true)
-      .lt('stock', 10)
-      .order('stock', { ascending: true })
-      .limit(5),
+      .lt('stock', 10),
     // Top moving products by units sold, in-store
     supabase
       .from('sale_items')
@@ -109,6 +114,15 @@ export default async function SellDashboardPage() {
 
   const totalRevenueToday = (salesToday ?? []).reduce((sum, item) => sum + Number(item.total), 0)
   const totalTransactionsToday = (salesToday ?? []).length
+
+  // Recipe-based rows are excluded here — see the query comment above —
+  // so a restaurant dish with an attached recipe never shows as falsely
+  // "low stock" or "out of stock" just because its stock column sits at 0
+  // by convention while its ingredients are perfectly well stocked.
+  const allLowStock = (stockCandidates ?? [])
+    .filter(p => !p.recipes || p.recipes.length === 0)
+    .sort((a, b) => a.stock - b.stock)
+  const lowStockProducts = allLowStock.slice(0, 5)
 
   const dynamicSalesMap: Record<number, { name: string; sku: string; qty: number }> = {}
   ;(topSellingItems ?? []).forEach(item => {
@@ -151,7 +165,7 @@ export default async function SellDashboardPage() {
           <Card className="transition-colors hover:border-primary/40">
             <CardContent className="flex items-start justify-between">
               <div>
-                <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Products listed</span>
+                <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">{meta.catalogLabel} listed</span>
                 <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{productCount ?? 0}</h3>
               </div>
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10">
@@ -179,7 +193,14 @@ export default async function SellDashboardPage() {
           <CardContent className="flex items-start justify-between">
             <div>
               <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Low stock items</span>
-              <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{lowStockProducts?.length ?? 0}</h3>
+              {meta.tracksStock ? (
+                <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">{allLowStock.length}</h3>
+              ) : (
+                <>
+                  <h3 className="mt-2 font-serif text-3xl font-normal text-foreground">—</h3>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{meta.catalogLabelSingular}s never run out</p>
+                </>
+              )}
             </div>
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
               <AlertTriangle className="size-4 text-amber-600" />
@@ -191,8 +212,8 @@ export default async function SellDashboardPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card className="flex flex-col p-4">
           <div className="mb-3">
-            <h4 className="text-sm font-semibold text-foreground">Top Moving Stock (POS)</h4>
-            <p className="text-[11px] text-muted-foreground">Most frequent in-store products by units sold.</p>
+            <h4 className="text-sm font-semibold text-foreground">Top Moving {meta.catalogLabel} (POS)</h4>
+            <p className="text-[11px] text-muted-foreground">Most frequent in-store {meta.catalogLabel.toLowerCase()} by units sold.</p>
           </div>
           <div className="flex-1 overflow-x-auto">
             {sortedTopProducts.length === 0 ? (
@@ -203,7 +224,7 @@ export default async function SellDashboardPage() {
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="label-mono border-b bg-gradient-brand-soft">
-                    <th className="rounded-l-md p-2">Product</th>
+                    <th className="rounded-l-md p-2">{meta.catalogLabelSingular}</th>
                     <th className="p-2">SKU</th>
                     <th className="rounded-r-md p-2 text-right">Units Sold</th>
                   </tr>
@@ -225,25 +246,34 @@ export default async function SellDashboardPage() {
         <Card className="flex flex-col p-4">
           <div className="mb-3">
             <h4 className="text-sm font-semibold text-foreground">Low Stock Alerts</h4>
-            <p className="text-[11px] text-muted-foreground">Standalone products under 10 units remaining.</p>
+            <p className="text-[11px] text-muted-foreground">
+              {meta.tracksStock
+                ? `Standalone ${meta.catalogLabel.toLowerCase()} under 10 units remaining — recipe-based items are tracked via their ingredients instead.`
+                : `${meta.catalogLabelSingular}s have no stock to track — they're always available to sell.`}
+            </p>
           </div>
           <div className="flex-1 overflow-x-auto">
-            {(lowStockProducts ?? []).length === 0 ? (
+            {!meta.tracksStock ? (
+              <div className="flex flex-col items-center gap-1.5 rounded-lg bg-emerald-50 py-12 text-center text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                <CheckCircle2 className="size-5" />
+                Every {meta.catalogLabelSingular.toLowerCase()} is always available.
+              </div>
+            ) : lowStockProducts.length === 0 ? (
               <div className="flex flex-col items-center gap-1.5 rounded-lg bg-emerald-50 py-12 text-center text-xs font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
                 <PartyPopper className="size-5" />
-                All products are fully stocked above the threshold.
+                All {meta.catalogLabel.toLowerCase()} are fully stocked above the threshold.
               </div>
             ) : (
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="label-mono border-b bg-gradient-brand-soft">
-                    <th className="rounded-l-md p-2">Product</th>
+                    <th className="rounded-l-md p-2">{meta.catalogLabelSingular}</th>
                     <th className="p-2">SKU</th>
                     <th className="rounded-r-md p-2 text-right">Stock</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y text-xs">
-                  {(lowStockProducts ?? []).map(p => (
+                  {lowStockProducts.map(p => (
                     <tr key={p.id} className="transition-colors hover:bg-muted/50">
                       <td className="max-w-[220px] truncate p-2.5 font-medium text-foreground">{p.name}</td>
                       <td className="p-2.5 font-mono text-muted-foreground">{p.sku ?? 'N/A'}</td>
