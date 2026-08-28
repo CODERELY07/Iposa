@@ -35,6 +35,37 @@ export async function updateBusinessSettingsAction(payload: {
   return { success: true as const }
 }
 
+// Where customers pick up a 'pickup' order from — see MapLocationPicker on
+// the settings page and the pickup block on the shop page / customer's own
+// orders list, which fall back to "the seller will reach out" copy when
+// these are unset. A plain owner-scoped write, same as the settings form
+// above — no cross-table invariant to protect.
+export async function updateBusinessLocationAction(payload: {
+  address: string | null
+  location_lat: number | null
+  location_lng: number | null
+}) {
+  const business = await requireApprovedBusiness()
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('businesses')
+    .update({
+      address: payload.address,
+      location_lat: payload.location_lat,
+      location_lng: payload.location_lng,
+    })
+    .eq('id', business.id)
+
+  if (error) {
+    return { success: false as const, message: error.message }
+  }
+
+  revalidatePath('/sell/settings')
+  revalidatePath(`/shop/${business.slug}`)
+  return { success: true as const }
+}
+
 // Upserts this business's affiliate-program settings (one row per business).
 // A plain owner-scoped RLS write, not an RPC — there's no cross-table
 // invariant to protect here, unlike register_business()/process_sale().

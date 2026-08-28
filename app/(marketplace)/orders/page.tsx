@@ -13,7 +13,13 @@ export const revalidate = 0
 const CONFIRMATION_WINDOW_DAYS = 4
 
 type OrderWithItems = StoreOrder & {
-  businesses: { name: string; slug: string } | null
+  businesses: {
+    name: string
+    slug: string
+    address: string | null
+    location_lat: number | null
+    location_lng: number | null
+  } | null
   store_order_items: StoreOrderItem[]
 }
 
@@ -34,7 +40,7 @@ export default async function MyOrdersPage() {
 
   const { data: orders, error } = await supabase
     .from('store_orders')
-    .select('*, businesses(name, slug), store_order_items(*)')
+    .select('*, businesses(name, slug, address, location_lat, location_lng), store_order_items(*)')
     .eq('customer_id', user.id)
     .order('created_at', { ascending: false })
 
@@ -114,7 +120,23 @@ export default async function MyOrdersPage() {
 
             <div className="border-b px-4 py-2.5 text-xs text-muted-foreground">
               {order.fulfillment_method === 'pickup' ? (
-                'Pickup — the seller will contact you with the pickup address and timing.'
+                order.businesses?.address ? (
+                  <>
+                    <span className="font-medium text-foreground">Pick up from:</span> {order.businesses.address}
+                    {order.businesses.location_lat != null && order.businesses.location_lng != null && (
+                      <a
+                        href={`https://www.openstreetmap.org/?mlat=${order.businesses.location_lat}&mlon=${order.businesses.location_lng}#map=17/${order.businesses.location_lat}/${order.businesses.location_lng}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <MapPinned className="size-3" /> View on map
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  'Pickup — the seller will contact you with the pickup address and timing.'
+                )
               ) : (
                 <>
                   {order.shipping_address}

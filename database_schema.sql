@@ -102,6 +102,16 @@ CREATE TABLE IF NOT EXISTS public.businesses (
   -- below) rather than getting a different fixed type per trade.
   business_type text NOT NULL DEFAULT 'retail' CHECK (business_type IN ('restaurant', 'services', 'retail')),
   rejection_reason text,
+  -- Set from Shop Settings via MapLocationPicker (the same free
+  -- Leaflet/OpenStreetMap+Nominatim flow checkout uses for a delivery pin —
+  -- see components/marketplace/MapLocationPicker.tsx) rather than at
+  -- registration: a business may not know/need this until it actually
+  -- turns pickup on. All three are optional and shown together — a shop
+  -- with an address but no pin still displays the address; store_orders'
+  -- own shipping_lat/lng are a separate, per-order concept and unaffected.
+  address text,
+  location_lat numeric(9,6),
+  location_lng numeric(9,6),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -109,6 +119,9 @@ CREATE TABLE IF NOT EXISTS public.businesses (
 -- without the column — ADD COLUMN with a DEFAULT back-fills existing rows
 -- instead of erroring, so this is safe to re-run even with live data.
 ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS business_type text NOT NULL DEFAULT 'retail';
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS address text;
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS location_lat numeric(9,6);
+ALTER TABLE public.businesses ADD COLUMN IF NOT EXISTS location_lng numeric(9,6);
 -- Drop the old CHECK before migrating data, since a stricter constraint
 -- would otherwise reject the UPDATE below on a database still holding the
 -- retired 'print_shop' value.

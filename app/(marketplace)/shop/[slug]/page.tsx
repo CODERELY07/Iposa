@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ProductCard from '@/components/marketplace/ProductCard'
-import { Store, PackageX } from 'lucide-react'
+import { Store, PackageX, MapPinned } from 'lucide-react'
 import type { MarketplaceProduct } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -12,7 +12,7 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
 
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, name, slug, description, logo_url, banner_url, status')
+    .select('id, name, slug, description, logo_url, banner_url, status, address, location_lat, location_lng')
     .eq('slug', slug)
     .eq('status', 'approved')
     .maybeSingle()
@@ -43,6 +43,22 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
             <h1 className="font-serif text-3xl font-normal tracking-tight text-foreground">{business.name}</h1>
             {business.description && (
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{business.description}</p>
+            )}
+            {business.address && (
+              <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                <MapPinned className="size-3.5 shrink-0 text-primary" />
+                {business.address}
+                {business.location_lat != null && business.location_lng != null && (
+                  <a
+                    href={`https://www.openstreetmap.org/?mlat=${business.location_lat}&mlon=${business.location_lng}#map=17/${business.location_lat}/${business.location_lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    View on map
+                  </a>
+                )}
+              </p>
             )}
           </div>
         </div>

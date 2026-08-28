@@ -29,12 +29,19 @@ export default function MapLocationPicker({
   initialLat,
   initialLng,
   onConfirm,
+  title = 'Confirm delivery location',
+  description = 'Search your address, then drag the pin (or tap the map) to line it up exactly.',
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialLat?: number | null
   initialLng?: number | null
   onConfirm: (result: MapLocationResult) => void
+  /** Defaults are worded for a checkout delivery pin — pass these when
+   *  reusing the picker elsewhere (e.g. a business's own pickup location in
+   *  Shop Settings) so the copy actually matches what's being set. */
+  title?: string
+  description?: string
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -176,10 +183,8 @@ export default function MapLocationPicker({
     <Dialog open={open} onOpenChange={o => !confirming && onOpenChange(o)}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Confirm delivery location</DialogTitle>
-          <DialogDescription>
-            Search your address, then drag the pin (or tap the map) to line it up exactly.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <div className="relative">

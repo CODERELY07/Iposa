@@ -35,6 +35,7 @@ export default async function SellOrdersPage() {
       orders={orders ?? []}
       onUpdateStatus={updateOrderStatusAction}
       onCancel={cancelOrderAction}
+      hasPickupLocation={Boolean(business.address)}
     />
   )
 }

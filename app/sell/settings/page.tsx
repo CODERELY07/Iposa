@@ -1,10 +1,11 @@
 import { requireApprovedBusiness, createClient } from '@/lib/supabase/server'
 import BusinessSettingsForm from '@/components/marketplace/BusinessSettingsForm'
+import BusinessLocationForm from '@/components/marketplace/BusinessLocationForm'
 import AffiliateSettingsForm from '@/components/marketplace/AffiliateSettingsForm'
 import ManagerPinForm from '@/components/business/ManagerPinForm'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { getBusinessTypeMeta } from '@/lib/business/type-meta'
-import { Store, Link2, KeyRound } from 'lucide-react'
+import { Store, MapPinned, Link2, KeyRound } from 'lucide-react'
 import type { BusinessAffiliateSettings } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -46,6 +47,21 @@ export default async function SellSettingsPage() {
             Registered as a <span className="font-medium text-foreground">{typeMeta.label}</span> — {typeMeta.costingSummary}
           </p>
           <BusinessSettingsForm business={business} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_oklch,var(--brand-pink),transparent_88%)] text-[color:var(--brand-pink)]">
+            <MapPinned className="size-4" />
+          </span>
+          <div>
+            <CardTitle>Pickup Location</CardTitle>
+            <CardDescription>Where customers pick up a &apos;pickup&apos; order from — shown on their order once placed.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <BusinessLocationForm business={business} />
         </CardContent>
       </Card>
 

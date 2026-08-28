@@ -19,6 +19,11 @@ export type Business = {
   status: BusinessStatus
   business_type: BusinessType
   rejection_reason: string | null
+  // Set from Shop Settings — see MapLocationPicker. Optional; a pickup order
+  // falls back to "the seller will reach out" copy when these aren't set.
+  address: string | null
+  location_lat: number | null
+  location_lng: number | null
   created_at: string
   updated_at: string
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import type { FulfillmentMethod, OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
 import { Card } from '@/components/ui/card'
@@ -57,10 +58,15 @@ export default function StoreOrdersClient({
   orders,
   onUpdateStatus,
   onCancel,
+  hasPickupLocation,
 }: {
   orders: OrderRow[]
   onUpdateStatus: (orderId: string, status: OrderStatus) => Promise<void>
   onCancel: (orderId: string, reason: string) => Promise<{ success: boolean; message?: string }>
+  // Whether this business has set a pickup address in Shop Settings — see
+  // BusinessLocationForm. Just powers a nudge below; a business with no
+  // pickup orders at all has no real need to set one.
+  hasPickupLocation: boolean
 }) {
   const [isPending, startTransition] = useTransition()
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -228,7 +234,20 @@ export default function StoreOrdersClient({
               </p>
               <p className="text-sm text-foreground">{order.shipping_phone}</p>
               {order.fulfillment_method === 'pickup' ? (
-                <p className="text-sm text-muted-foreground">Customer will pick this up in person.</p>
+                <p className="text-sm text-muted-foreground">
+                  Customer will pick this up in person.{' '}
+                  {hasPickupLocation ? (
+                    'They can see your pickup address and pin.'
+                  ) : (
+                    <>
+                      You haven&apos;t set a pickup location yet —{' '}
+                      <Link href="/sell/settings" className="text-primary hover:underline">
+                        add one in Settings
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
               ) : (
                 <>
                   <p className="text-sm text-foreground">{order.shipping_address}</p>
