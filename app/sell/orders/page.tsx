@@ -1,6 +1,6 @@
 import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import StoreOrdersClient from '@/components/marketplace/StoreOrdersClient'
-import { updateOrderStatusAction, requestOrderCompletionAction } from './actions'
+import { updateOrderStatusAction, cancelOrderAction } from './actions'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle } from 'lucide-react'
 
@@ -34,7 +34,7 @@ export default async function SellOrdersPage() {
     <StoreOrdersClient
       orders={orders ?? []}
       onUpdateStatus={updateOrderStatusAction}
-      onRequestCompletion={requestOrderCompletionAction}
+      onCancel={cancelOrderAction}
     />
   )
 }

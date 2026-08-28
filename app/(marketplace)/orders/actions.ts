@@ -36,3 +36,23 @@ export async function disputeOrderAction(orderId: string, reason: string) {
   revalidatePath('/orders')
   return { success: true as const }
 }
+
+// "This shows cancelled, but I actually got it" — see
+// report_cancelled_order() in database_schema.sql. Routed to super_admin
+// through the same 'disputed' pipeline as disputeOrderAction above; only
+// the entry point (a cancelled order, not an awaiting-confirmation one) differs.
+export async function reportCancelledOrderAction(orderId: string, reason: string) {
+  const supabase = await createClient()
+
+  const { error } = await supabase.rpc('report_cancelled_order', {
+    p_order_id: orderId,
+    p_reason: reason,
+  })
+
+  if (error) {
+    return { success: false as const, message: error.message }
+  }
+
+  revalidatePath('/orders')
+  return { success: true as const }
+}

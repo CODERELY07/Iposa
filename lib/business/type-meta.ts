@@ -1,3 +1,4 @@
+import { UtensilsCrossed, Wrench, Package, type LucideIcon } from 'lucide-react'
 import type { BusinessType } from '@/lib/types/marketplace'
 
 // Everything the /sell dashboard needs to know to adapt itself to a
@@ -28,6 +29,9 @@ export type BusinessTypeMeta = {
   shortLabel: string
   tagline: string
   description: string
+  /** Shared everywhere a type needs a glyph — registration, the marketplace's
+   *  own "browse by type" section, anywhere else a type is picked or shown. */
+  Icon: LucideIcon
   /** How COGS is computed, in one line — shown on the registration card. */
   costingSummary: string
   /** "Ingredients" vs "Materials" — used on the sidebar nav + that page's copy. */
@@ -53,6 +57,7 @@ export const BUSINESS_TYPE_META: Record<BusinessType, BusinessTypeMeta> = {
     label: 'Restaurant / Food & Beverage',
     shortLabel: 'Restaurant',
     tagline: 'Dishes made from ingredients',
+    Icon: UtensilsCrossed,
     description:
       'Menu items are built from ingredients you stock. Attach a recipe to a dish and its food cost is calculated automatically from what it actually consumes.',
     costingSummary: 'Cost per dish = ingredients consumed × their cost — computed live from your recipes.',
@@ -71,6 +76,7 @@ export const BUSINESS_TYPE_META: Record<BusinessType, BusinessTypeMeta> = {
     label: 'Services',
     shortLabel: 'Services',
     tagline: 'A catalog of services you perform',
+    Icon: Wrench,
     description:
       'Printing, repairs, salons, cleaning — anything you charge per job. Add each service you offer with a name and description (e.g. Print, Photocopy, Lamination — or Cellphone LCD Replacement, Battery Replacement), set its price, and it\'s ready to sell. A service is never "out of stock," and you can still ring up a one-off custom job on the spot when something isn\'t worth cataloguing.',
     costingSummary: 'Cost per service = whatever you set on it (optional) — there\'s no stock to run out of.',
@@ -89,6 +95,7 @@ export const BUSINESS_TYPE_META: Record<BusinessType, BusinessTypeMeta> = {
     label: 'Retail / Single Product',
     shortLabel: 'Retail',
     tagline: 'Finished goods you stock',
+    Icon: Package,
     description:
       'You sell finished goods you already have on hand — one flagship product or a small catalog. Cost is whatever you paid your supplier, tracked directly on the product, no recipe needed.',
     costingSummary: 'Cost per unit = the supplier cost you set directly on the product.',

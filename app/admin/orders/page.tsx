@@ -1,9 +1,10 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import AdminOrdersClient from '@/components/marketplace/AdminOrdersClient'
 import { resolveOrderAction } from './actions'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-react'
-import type { OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle, Flag } from 'lucide-react'
+import type { FulfillmentMethod, OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
 
 export const revalidate = 0
 
@@ -11,7 +12,10 @@ type AdminOrderRow = {
   id: string
   status: OrderStatus
   total: number
+  fulfillment_method: FulfillmentMethod
   dispute_reason: string | null
+  disputed_from_cancellation: boolean
+  cancellation_reason: string | null
   awaiting_confirmation_at: string | null
   created_at: string
   businesses: { name: string; slug: string } | null
@@ -28,6 +32,18 @@ const PRIORITY: Partial<Record<OrderStatus, number>> = {
   awaiting_confirmation: 1,
 }
 
+// One customer report could be an honest mixup; several for the same shop
+// is the actual fraud signal worth an admin's attention — see
+// business_cancellation_reports in database_schema.sql (SECTION 13).
+const FLAG_THRESHOLD = 2
+
+type FlaggedBusiness = {
+  business_id: string
+  business_name: string
+  business_slug: string
+  reported_count: number
+}
+
 export default async function AdminOrdersPage() {
   const supabase = await createClient()
 
@@ -38,6 +54,13 @@ export default async function AdminOrdersPage() {
     .from('store_orders')
     .select('*, businesses(name, slug), profiles(full_name), store_order_items(*)')
     .order('created_at', { ascending: false })
+
+  const { data: flagged } = await supabase
+    .from('business_cancellation_reports')
+    .select('*')
+    .gte('reported_count', FLAG_THRESHOLD)
+    .order('reported_count', { ascending: false })
+    .returns<FlaggedBusiness[]>()
 
   const sorted = ((orders ?? []) as AdminOrderRow[]).sort((a, b) => {
     const pa = PRIORITY[a.status] ?? 2
@@ -53,6 +76,29 @@ export default async function AdminOrdersPage() {
           Disputed and stalled orders first. Force-complete or force-refund any order regardless of what either side has done.
         </p>
       </div>
+
+      {flagged && flagged.length > 0 && (
+        <Alert variant="destructive" className="mb-5">
+          <Flag />
+          <AlertTitle>Repeat cancellation reports</AlertTitle>
+          <AlertDescription>
+            <p className="mb-2">
+              These shops have multiple customer reports of a &quot;cancelled&quot; order actually being received — a
+              pattern worth reviewing, not just the individual disputes below.
+            </p>
+            <ul className="space-y-0.5">
+              {flagged.map(b => (
+                <li key={b.business_id}>
+                  <Link href={`/shop/${b.business_slug}`} className="font-medium underline underline-offset-2">
+                    {b.business_name}
+                  </Link>{' '}
+                  — {b.reported_count} report{b.reported_count === 1 ? '' : 's'}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {error ? (
         <Alert variant="destructive">

@@ -2,11 +2,19 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import type { CartItem } from '@/lib/types/marketplace'
+import type { CartItem, FulfillmentMethod } from '@/lib/types/marketplace'
 
 export async function placeOrderAction(
   items: CartItem[],
-  shipping: { name: string; phone: string; address: string; notes?: string }
+  shipping: {
+    name: string
+    phone: string
+    address: string
+    notes?: string
+    fulfillmentMethod: FulfillmentMethod
+    lat?: number | null
+    lng?: number | null
+  }
 ) {
   const supabase = await createClient()
 
@@ -20,6 +28,9 @@ export async function placeOrderAction(
     p_shipping_phone: shipping.phone,
     p_shipping_address: shipping.address,
     p_notes: shipping.notes || null,
+    p_fulfillment_method: shipping.fulfillmentMethod,
+    p_shipping_lat: shipping.lat ?? null,
+    p_shipping_lng: shipping.lng ?? null,
   })
 
   if (error) {

@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Card } from '@/components/ui/card'
-import { OrderStatusBadge } from '@/components/marketplace/StatusBadge'
+import { OrderStatusBadge, FulfillmentBadge } from '@/components/marketplace/StatusBadge'
 import OrderConfirmationActions from '@/components/marketplace/OrderConfirmationActions'
-import { Clock3, ShieldAlert, PackageX } from 'lucide-react'
+import ReportCancelledOrder from '@/components/marketplace/ReportCancelledOrder'
+import { Clock3, ShieldAlert, PackageX, MapPinned, Ban } from 'lucide-react'
 import type { OrderStatus, StoreOrder, StoreOrderItem } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -71,7 +72,10 @@ export default async function MyOrdersPage() {
                   Placed {new Date(order.created_at).toLocaleString()}
                 </p>
               </div>
-              <OrderStatusBadge status={order.status as OrderStatus} />
+              <div className="flex items-center gap-2">
+                <FulfillmentBadge method={order.fulfillment_method} />
+                <OrderStatusBadge status={order.status as OrderStatus} />
+              </div>
             </div>
 
             {order.status === 'awaiting_confirmation' && (
@@ -79,7 +83,7 @@ export default async function MyOrdersPage() {
                 <p className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
                   <Clock3 className="size-3.5 shrink-0 translate-y-0.5" />
                   <span>
-                    {order.businesses?.name ?? 'The shop'} says this is done.
+                    {order.businesses?.name ?? 'The shop'} says this is out for delivery — confirm once you&apos;ve got it.
                     {deadline && ` If you don't respond by ${deadline.toLocaleDateString()}, it'll auto-confirm.`}
                   </span>
                 </p>
@@ -93,6 +97,40 @@ export default async function MyOrdersPage() {
                 <span>Your report is being reviewed by MElocalmarketplace support. We&apos;ll follow up soon.</span>
               </div>
             )}
+
+            {order.status === 'cancelled' && (
+              <div className="space-y-2.5 border-b bg-muted/50 px-4 py-3">
+                <p className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Ban className="size-3.5 shrink-0 translate-y-0.5" />
+                  <span>
+                    {order.cancellation_reason
+                      ? <>The shop cancelled this: &quot;{order.cancellation_reason}&quot;</>
+                      : 'This order was cancelled.'}
+                  </span>
+                </p>
+                <ReportCancelledOrder orderId={order.id} />
+              </div>
+            )}
+
+            <div className="border-b px-4 py-2.5 text-xs text-muted-foreground">
+              {order.fulfillment_method === 'pickup' ? (
+                'Pickup — the seller will contact you with the pickup address and timing.'
+              ) : (
+                <>
+                  {order.shipping_address}
+                  {order.shipping_lat != null && order.shipping_lng != null && (
+                    <a
+                      href={`https://www.openstreetmap.org/?mlat=${order.shipping_lat}&mlon=${order.shipping_lng}#map=17/${order.shipping_lat}/${order.shipping_lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-2 inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <MapPinned className="size-3" /> View pinned location
+                    </a>
+                  )}
+                </>
+              )}
+            </div>
 
             <div className="divide-y">
               {(order.store_order_items ?? []).map((item) => (

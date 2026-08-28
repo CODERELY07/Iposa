@@ -87,14 +87,19 @@ export type MarketplaceProduct = {
   business_name: string
   business_slug: string
   business_logo_url: string | null
+  // Powers the "browse by type" section on the marketplace home page — see
+  // lib/business/type-meta.ts for what each value means.
+  business_type: BusinessType
   created_at: string
 }
 
-// 'awaiting_confirmation': the business claims the order is done; this alone
-// never finalizes anything — it just opens a confirmation window for the
-// customer. 'disputed': the customer rejected that claim, routed to
-// super_admin. See request_order_completion() and friends in
-// database_schema.sql SECTION 11 for the full state machine.
+// 'awaiting_confirmation': the business set this directly ("out for
+// delivery"); this alone never finalizes anything — it just opens a
+// confirmation window for the customer, and the business can't reverse it.
+// 'disputed': the customer rejected that claim, or reported a 'cancelled'
+// order they actually received — either way routed to super_admin. See
+// confirm_order_completion() and friends in database_schema.sql SECTION 11
+// (and SECTION 13 for the cancellation-report path) for the full state machine.
 export type OrderStatus =
   | 'pending'
   | 'paid'
@@ -105,6 +110,8 @@ export type OrderStatus =
   | 'disputed'
   | 'cancelled'
 
+export type FulfillmentMethod = 'delivery' | 'pickup'
+
 export type StoreOrder = {
   id: string
   business_id: string
@@ -114,10 +121,23 @@ export type StoreOrder = {
   total: number
   shipping_name: string | null
   shipping_phone: string | null
+  fulfillment_method: FulfillmentMethod
   shipping_address: string | null
+  // Set only when the customer confirmed a pin on the checkout map — see
+  // MapLocationPicker. Never required; shipping_address alone is enough.
+  shipping_lat: number | null
+  shipping_lng: number | null
   notes: string | null
   awaiting_confirmation_at: string | null
+  // Filled in by dispute_order_completion() or report_cancelled_order() —
+  // the customer's own account of what went wrong, shown to super_admin
+  // when resolving the dispute. disputed_from_cancellation tells the two
+  // cases apart.
   dispute_reason: string | null
+  disputed_from_cancellation: boolean
+  // Required whenever a business cancels an order directly — shown to the
+  // customer. Null for a super_admin force-refund.
+  cancellation_reason: string | null
   platform_fee_rate: number | null
   platform_fee_amount: number | null
   created_at: string

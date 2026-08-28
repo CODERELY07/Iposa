@@ -426,23 +426,50 @@ CREATE TABLE IF NOT EXISTS public.store_orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   customer_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  -- 'awaiting_confirmation': the business says it's done, but that alone
-  -- never finalizes anything — see request_order_completion() in SECTION 11.
-  -- 'disputed': the customer rejected that claim; routed to super_admin.
+  -- 'awaiting_confirmation': the business set this directly to open the
+  -- customer's confirmation window — see SECTION 11 for why that alone
+  -- never finalizes anything, and why the business can't then reverse it.
+  -- 'disputed': the customer rejected that claim, or reported a 'cancelled'
+  -- order they actually received (see report_cancelled_order() in SECTION
+  -- 13) — either way it's routed to super_admin.
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation', 'completed', 'disputed', 'cancelled')),
   subtotal numeric(10,2) NOT NULL DEFAULT 0,
   total numeric(10,2) NOT NULL DEFAULT 0,
   shipping_name text,
   shipping_phone text,
+  -- 'pickup' orders carry no address at all — the customer collects
+  -- in person, so place_order() below only requires this for 'delivery'.
+  fulfillment_method text NOT NULL DEFAULT 'delivery' CHECK (fulfillment_method IN ('delivery', 'pickup')),
   shipping_address text,
+  -- Optional: set only when the customer confirmed their drop-off pin on
+  -- the checkout map (see MapLocationPicker on the app side, which geocodes
+  -- via OpenStreetMap/Nominatim — no Google Maps billing involved). Never
+  -- required — shipping_address alone is always enough to fulfill a
+  -- delivery order.
+  shipping_lat numeric(9,6),
+  shipping_lng numeric(9,6),
   notes text,
-  -- Stamped by request_order_completion() when the business claims the order
-  -- is done; auto_confirm_stale_orders() uses it to finalize the order on its
-  -- own once order_confirmation_window() has passed with no customer response.
+  -- Stamped automatically (trg_stamp_awaiting_confirmation, SECTION 11) the
+  -- moment status first becomes 'awaiting_confirmation'; auto_confirm_stale_orders()
+  -- uses it to finalize the order on its own once order_confirmation_window()
+  -- has passed with no customer response.
   awaiting_confirmation_at timestamptz,
-  -- Filled in by dispute_order_completion() — the customer's own account of
-  -- what went wrong, shown to super_admin when resolving the dispute.
+  -- Filled in by dispute_order_completion() or report_cancelled_order() —
+  -- the customer's own account of what went wrong, shown to super_admin
+  -- when resolving the dispute. disputed_from_cancellation (SECTION 13)
+  -- tells the two cases apart.
   dispute_reason text,
+  -- Required (see trg_enforce_order_status_rules, SECTION 11) whenever a
+  -- business cancels an order directly — shown to the customer so a silent
+  -- cancel-but-deliver-anyway at least leaves a visible discrepancy. Left
+  -- NULL for a super_admin force-refund via admin_resolve_order(), which
+  -- bypasses this requirement.
+  cancellation_reason text,
+  -- true when this order's 'disputed' status came from a customer
+  -- reporting a 'cancelled' order they actually received (SECTION 13),
+  -- rather than from the normal dispute_order_completion() path. Powers
+  -- the per-business repeat-report signal in business_cancellation_reports.
+  disputed_from_cancellation boolean NOT NULL DEFAULT false,
   -- Snapshotted onto the order (not just computed on the fly) at the same
   -- moment the order is finalized as 'completed' — see
   -- sync_order_finalization() in SECTION 11 — so a later change to
@@ -464,6 +491,14 @@ ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS awaiting_confirmation_a
 ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS dispute_reason text;
 ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS platform_fee_rate numeric(5,2);
 ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS platform_fee_amount numeric(10,2);
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS fulfillment_method text NOT NULL DEFAULT 'delivery';
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS shipping_lat numeric(9,6);
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS shipping_lng numeric(9,6);
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS cancellation_reason text;
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS disputed_from_cancellation boolean NOT NULL DEFAULT false;
+ALTER TABLE public.store_orders DROP CONSTRAINT IF EXISTS store_orders_fulfillment_method_check;
+ALTER TABLE public.store_orders ADD CONSTRAINT store_orders_fulfillment_method_check
+  CHECK (fulfillment_method IN ('delivery', 'pickup'));
 ALTER TABLE public.store_orders DROP CONSTRAINT IF EXISTS store_orders_status_check;
 ALTER TABLE public.store_orders ADD CONSTRAINT store_orders_status_check
   CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation', 'completed', 'disputed', 'cancelled'));
@@ -516,6 +551,9 @@ SELECT
   b.name AS business_name,
   b.slug AS business_slug,
   b.logo_url AS business_logo_url,
+  -- Powers the "browse by type" section on the marketplace home page — see
+  -- lib/business/type-meta.ts on the app side for what each value means.
+  b.business_type,
   sp.created_at
 FROM public.store_products sp
 JOIN public.businesses b ON b.id = sp.business_id AND b.status = 'approved'
@@ -1177,18 +1215,24 @@ CREATE POLICY "store_orders_select_participant" ON public.store_orders FOR SELEC
   );
 
 -- A business owner may move an order through its own pre-confirmation
--- states directly, but 'awaiting_confirmation', 'completed', and 'disputed'
--- are excluded from this policy's WITH CHECK on purpose — those only ever
--- happen through request_order_completion() / confirm_order_completion() /
--- dispute_order_completion() / admin_resolve_order() (SECURITY DEFINER, see
--- SECTION 11), so a business can never unilaterally mark its own order
--- 'completed' by any path, not just the ones the UI happens to expose.
+-- states directly, including into 'awaiting_confirmation' — opening the
+-- customer's confirmation window is just another direct status change now
+-- (see SECTION 11), not a separate RPC. 'completed' and 'disputed' stay
+-- excluded from this policy's WITH CHECK on purpose — those only ever
+-- happen through confirm_order_completion() / dispute_order_completion() /
+-- admin_resolve_order() (SECURITY DEFINER, see SECTION 11), so a business
+-- can never unilaterally mark its own order 'completed' by any path, not
+-- just the ones the UI happens to expose. And once a row actually reaches
+-- 'awaiting_confirmation', this policy alone can't stop a business from
+-- targeting it again afterward (e.g. straight to 'cancelled') — that part
+-- is enforced by the trg_enforce_order_status_rules trigger in SECTION 11,
+-- which this policy has no way to express on its own.
 DROP POLICY IF EXISTS "store_orders_update_business_owner" ON public.store_orders;
 CREATE POLICY "store_orders_update_business_owner" ON public.store_orders FOR UPDATE
   USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid()))
   WITH CHECK (
     EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid())
-    AND status IN ('pending', 'paid', 'processing', 'shipped', 'cancelled')
+    AND status IN ('pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation', 'cancelled')
   );
 -- No direct INSERT policy: orders are only created via place_order() (SECURITY DEFINER),
 -- which keeps stock decrements and multi-vendor order splitting atomic.
@@ -1836,8 +1880,11 @@ CREATE POLICY "affiliate_payouts_select_own_or_admin" ON public.affiliate_payout
 -- =============================================================================
 -- SECTION 11 — ORDER COMPLETION CONFIRMATION FLOW
 -- Neither side of an online order gets to unilaterally decide it's "done":
---   paid/processing/shipped
---     --(business: request_order_completion)--> awaiting_confirmation
+--   pending/paid/processing/shipped
+--     --(business sets status = 'awaiting_confirmation' directly)--> awaiting_confirmation
+--       [locked from here on — see enforce_order_status_rules() below; the
+--        business's own UPDATE policy can still target the row, but only
+--        the SECURITY DEFINER functions past this point may move it further]
 --       --(customer: confirm_order_completion)--> completed
 --       --(customer: dispute_order_completion)--> disputed --(super_admin: admin_resolve_order)--> completed | cancelled
 --       --(nobody responds for order_confirmation_window(); auto_confirm_stale_orders())--> completed
@@ -1847,6 +1894,19 @@ CREATE POLICY "affiliate_payouts_select_own_or_admin" ON public.affiliate_payout
 -- `approved` and is payable, and the platform's own cut is snapshotted onto
 -- the order. A business's own store_orders UPDATE policy above cannot reach
 -- 'completed' by any path — only these SECURITY DEFINER functions can.
+--
+-- There used to be a separate request_order_completion() RPC the business
+-- called to open the confirmation window ("mark as done"). It's gone: that
+-- extra step let a business *choose* the moment it became answerable to the
+-- customer, which is exactly backwards. Setting status = 'awaiting_confirmation'
+-- is now just another direct status change (see the widened
+-- store_orders_update_business_owner policy above) — trg_stamp_awaiting_confirmation
+-- below stamps the timestamp automatically, and trg_enforce_order_status_rules
+-- makes sure that, once stamped, the business can't then quietly cancel (or
+-- otherwise rewrite) the order out from under the customer. See SECTION 13
+-- for the other half of this — a cancelled order can still be fulfilled
+-- entirely outside the app (COD, no payment gateway), which no in-app lock
+-- can prevent; that gap is closed by letting the customer report it instead.
 -- =============================================================================
 
 -- How long an 'awaiting_confirmation' order waits for the customer before
@@ -1902,47 +1962,78 @@ CREATE TRIGGER trg_sync_order_finalization
   BEFORE UPDATE OF status ON public.store_orders
   FOR EACH ROW EXECUTE FUNCTION public.sync_order_finalization();
 
--- The business claims an order is done. Never finalizes anything by itself —
--- it only opens the customer's confirmation window. Only reachable from the
--- states where "done" is a meaningful claim to make.
-CREATE OR REPLACE FUNCTION public.request_order_completion(p_order_id uuid)
-RETURNS public.store_orders
+-- Superseded by the business setting status = 'awaiting_confirmation'
+-- directly (see the flow comment above) — dropped so a re-run of this file
+-- against an already-upgraded database doesn't leave it callable.
+DROP FUNCTION IF EXISTS public.request_order_completion(uuid);
+
+-- The moment any UPDATE actually lands the order on 'awaiting_confirmation'
+-- for the first time, this stamps the timestamp that starts the customer's
+-- confirmation window — same job request_order_completion() used to do by
+-- hand, just automatic now regardless of which statement set the status.
+CREATE OR REPLACE FUNCTION public.stamp_awaiting_confirmation()
+RETURNS trigger
 LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
 AS $$
-DECLARE
-  v_uid uuid := auth.uid();
-  v_order public.store_orders;
 BEGIN
-  IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Not authenticated';
+  IF NEW.status = 'awaiting_confirmation' AND OLD.status IS DISTINCT FROM 'awaiting_confirmation' THEN
+    NEW.awaiting_confirmation_at := now();
   END IF;
-
-  SELECT o.* INTO v_order
-  FROM public.store_orders o
-  JOIN public.businesses b ON b.id = o.business_id
-  WHERE o.id = p_order_id AND b.owner_id = v_uid
-  FOR UPDATE OF o;
-
-  IF v_order.id IS NULL THEN
-    RAISE EXCEPTION 'Order not found';
-  END IF;
-
-  IF v_order.status NOT IN ('paid', 'processing', 'shipped') THEN
-    RAISE EXCEPTION 'Order cannot be marked done from status %', v_order.status;
-  END IF;
-
-  UPDATE public.store_orders
-  SET status = 'awaiting_confirmation', awaiting_confirmation_at = now()
-  WHERE id = p_order_id
-  RETURNING * INTO v_order;
-
-  RETURN v_order;
+  RETURN NEW;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.request_order_completion(uuid) TO authenticated;
+DROP TRIGGER IF EXISTS trg_stamp_awaiting_confirmation ON public.store_orders;
+CREATE TRIGGER trg_stamp_awaiting_confirmation
+  BEFORE UPDATE OF status ON public.store_orders
+  FOR EACH ROW EXECUTE FUNCTION public.stamp_awaiting_confirmation();
+
+-- The actual backstop behind the flow diagram above. store_orders_update_business_owner
+-- lets a business's own session target 'awaiting_confirmation' (so it can
+-- open the confirmation window itself, with no separate RPC) — but that
+-- same RLS policy has no idea *which* row it's starting from, so on its own
+-- it can't stop a business from then turning right around and cancelling an
+-- order the customer is already waiting to confirm. This trigger is what
+-- actually enforces "once awaiting_confirmation, only the SECURITY DEFINER
+-- functions below may move it further": each of them calls
+-- set_config('app.order_transition_allowed', 'true', true) immediately
+-- before its own UPDATE, scoped to just that statement's transaction, so a
+-- plain client UPDATE — even from the business's own authenticated session —
+-- can never set that flag itself.
+--
+-- It also requires a reason on any plain (non-admin) cancel, so a business
+-- can't silently cancel an order in-system while still fulfilling it
+-- off-system with the customer none the wiser that anything happened —
+-- see cancellation_reason in SECTION 13. This doesn't stop a determined bad
+-- actor (there's no payment gateway here to hold funds against it — see
+-- SECTION 13 for what actually closes that gap), but it removes the
+-- laziest version of the scam.
+CREATE OR REPLACE FUNCTION public.enforce_order_status_rules()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.awaiting_confirmation_at IS NOT NULL
+     AND NEW.status IS DISTINCT FROM OLD.status
+     AND current_setting('app.order_transition_allowed', true) IS DISTINCT FROM 'true' THEN
+    RAISE EXCEPTION 'This order is awaiting the customer''s confirmation and can no longer be changed directly.';
+  END IF;
+
+  IF NEW.status = 'cancelled'
+     AND OLD.status IS DISTINCT FROM 'cancelled'
+     AND current_setting('app.order_transition_allowed', true) IS DISTINCT FROM 'true'
+     AND (NEW.cancellation_reason IS NULL OR length(trim(NEW.cancellation_reason)) = 0) THEN
+    RAISE EXCEPTION 'A cancellation reason is required';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_order_status_rules ON public.store_orders;
+CREATE TRIGGER trg_enforce_order_status_rules
+  BEFORE UPDATE OF status ON public.store_orders
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_order_status_rules();
 
 -- The customer accepts the business's completion claim. This is the normal,
 -- happy-path way an order reaches 'completed'.
@@ -1970,6 +2061,7 @@ BEGIN
     RAISE EXCEPTION 'Order is not awaiting confirmation';
   END IF;
 
+  PERFORM set_config('app.order_transition_allowed', 'true', true);
   UPDATE public.store_orders SET status = 'completed' WHERE id = p_order_id RETURNING * INTO v_order;
 
   RETURN v_order;
@@ -2010,6 +2102,7 @@ BEGIN
     RAISE EXCEPTION 'Order is not awaiting confirmation';
   END IF;
 
+  PERFORM set_config('app.order_transition_allowed', 'true', true);
   UPDATE public.store_orders
   SET status = 'disputed', dispute_reason = trim(p_reason)
   WHERE id = p_order_id
@@ -2053,6 +2146,7 @@ BEGIN
     RAISE EXCEPTION 'Order is already finalized';
   END IF;
 
+  PERFORM set_config('app.order_transition_allowed', 'true', true);
   UPDATE public.store_orders SET status = p_resolution WHERE id = p_order_id RETURNING * INTO v_order;
 
   RETURN v_order;
@@ -2061,8 +2155,8 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.admin_resolve_order(uuid, text) TO authenticated;
 
--- Closes the opposite exploit from a business that never requests
--- completion: a customer who just ghosts an 'awaiting_confirmation' order
+-- Closes the opposite exploit from a business that never moves an order
+-- past 'awaiting_confirmation' on its own: a customer who just ghosts it
 -- forever to avoid ever confirming it. Safe to call from any authenticated
 -- session (it only ever touches rows objectively past their own deadline) —
 -- called opportunistically from every order-list page load (customer, business,
@@ -2077,6 +2171,7 @@ AS $$
 DECLARE
   v_count integer;
 BEGIN
+  PERFORM set_config('app.order_transition_allowed', 'true', true);
   UPDATE public.store_orders
   SET status = 'completed'
   WHERE status = 'awaiting_confirmation'
@@ -2089,3 +2184,312 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.auto_confirm_stale_orders() TO authenticated;
+
+-- =============================================================================
+-- SECTION 12 — DELIVERY / PICKUP FULFILLMENT
+-- Extends place_order() with fulfillment_method (see store_orders above) and
+-- an optional lat/lng pin the customer can drop on the checkout map. That
+-- map is plain Leaflet + OpenStreetMap/Nominatim on the app side — no Google
+-- Maps key or billing involved — so the coordinates are just whatever the
+-- customer confirmed there; nothing here depends on them existing.
+-- Keeps the same 5-arg signature as the previous definition earlier in this
+-- file (jsonb, text, text, text, text) so the DROP below is required: adding
+-- parameters — even ones with defaults — changes the function's identity for
+-- CREATE OR REPLACE, and without dropping the old 5-arg overload first, a
+-- 5-arg call from any not-yet-updated client would become ambiguous between
+-- the two overloads.
+-- =============================================================================
+
+DROP FUNCTION IF EXISTS public.place_order(jsonb, text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.place_order(
+  p_items jsonb,
+  p_shipping_name text,
+  p_shipping_phone text,
+  p_shipping_address text,
+  p_notes text DEFAULT NULL,
+  p_fulfillment_method text DEFAULT 'delivery',
+  p_shipping_lat numeric DEFAULT NULL,
+  p_shipping_lng numeric DEFAULT NULL
+)
+RETURNS SETOF public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_business_id uuid;
+  v_order_id uuid;
+  v_subtotal numeric(10,2);
+  v_order_ids uuid[] := '{}';
+  v_ref_code text;
+  v_ref_affiliate_id uuid;
+  v_ref_affiliate_user_id uuid;
+  v_ref_commission_rate numeric(5,2);
+  v_ref_business_owner uuid;
+  v_ref_item_subtotal numeric(10,2);
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_fulfillment_method NOT IN ('delivery', 'pickup') THEN
+    RAISE EXCEPTION 'Invalid fulfillment method: %', p_fulfillment_method;
+  END IF;
+
+  IF p_fulfillment_method = 'delivery' AND (p_shipping_address IS NULL OR length(trim(p_shipping_address)) = 0) THEN
+    RAISE EXCEPTION 'Delivery address is required';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Cart is empty';
+  END IF;
+
+  CREATE TEMPORARY TABLE _cart_items (
+    product_id bigint,
+    quantity integer,
+    ref_code text
+  ) ON COMMIT DROP;
+
+  INSERT INTO _cart_items (product_id, quantity, ref_code)
+  SELECT
+    (elem->>'product_id')::bigint,
+    (elem->>'quantity')::integer,
+    NULLIF(lower(elem->>'ref_code'), '')
+  FROM jsonb_array_elements(p_items) AS elem;
+
+  IF EXISTS (SELECT 1 FROM _cart_items WHERE quantity <= 0 OR product_id IS NULL) THEN
+    RAISE EXCEPTION 'Invalid quantity in cart';
+  END IF;
+
+  -- Lock the rows we're about to sell against concurrent checkouts.
+  PERFORM 1 FROM public.store_products p
+    JOIN _cart_items c ON c.product_id = p.id
+    FOR UPDATE OF p;
+
+  PERFORM 1 FROM public.ingredients i
+    JOIN public.recipes r ON r.ingredient_id = i.id
+    JOIN _cart_items c ON c.product_id = r.product_id
+    FOR UPDATE OF i;
+
+  -- Standalone products are checked against their own stock. Recipe-based
+  -- products are skipped here — their `stock` column is always kept at 0 by
+  -- convention, so checking it directly would reject every recipe-based order.
+  -- Untracked rows (services — see store_products.track_stock) skip this
+  -- check entirely: there's no finite count to run out of.
+  IF EXISTS (
+    SELECT 1
+    FROM _cart_items c
+    LEFT JOIN public.store_products p ON p.id = c.product_id
+    LEFT JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id IS NULL
+       OR p.is_active = false
+       OR b.status <> 'approved'
+       OR (p.track_stock AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id) AND p.stock < c.quantity)
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  -- Recipe-based products are checked against ingredient supply instead,
+  -- aggregated per ingredient (see process_sale() for why this can't be
+  -- checked per-product independently).
+  IF EXISTS (
+    SELECT r.ingredient_id
+    FROM _cart_items c
+    JOIN public.recipes r ON r.product_id = c.product_id
+    JOIN public.ingredients i ON i.id = r.ingredient_id
+    GROUP BY r.ingredient_id, i.current_stock
+    HAVING SUM(r.quantity_used * c.quantity) > i.current_stock
+  ) THEN
+    RAISE EXCEPTION 'One or more items are no longer available in the requested quantity';
+  END IF;
+
+  FOR v_business_id IN
+    SELECT DISTINCT p.business_id
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+  LOOP
+    SELECT COALESCE(SUM(c.quantity * p.price), 0)
+      INTO v_subtotal
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id
+      WHERE p.business_id = v_business_id;
+
+    INSERT INTO public.store_orders (
+      business_id, customer_id, status, subtotal, total,
+      shipping_name, shipping_phone, fulfillment_method, shipping_address, shipping_lat, shipping_lng, notes
+    )
+    VALUES (
+      v_business_id, v_uid, 'pending', v_subtotal, v_subtotal,
+      p_shipping_name, p_shipping_phone, p_fulfillment_method,
+      CASE WHEN p_fulfillment_method = 'delivery' THEN p_shipping_address ELSE NULL END,
+      CASE WHEN p_fulfillment_method = 'delivery' THEN p_shipping_lat ELSE NULL END,
+      CASE WHEN p_fulfillment_method = 'delivery' THEN p_shipping_lng ELSE NULL END,
+      p_notes
+    )
+    RETURNING id INTO v_order_id;
+
+    INSERT INTO public.store_order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
+    SELECT v_order_id, p.id, p.name, c.quantity, p.price, c.quantity * p.price
+    FROM _cart_items c
+    JOIN public.store_products p ON p.id = c.product_id
+    WHERE p.business_id = v_business_id;
+
+    UPDATE public.store_products p
+    SET stock = p.stock - c.quantity
+    FROM _cart_items c
+    WHERE p.id = c.product_id
+      AND p.business_id = v_business_id
+      AND p.track_stock
+      AND NOT EXISTS (SELECT 1 FROM public.recipes r WHERE r.product_id = p.id);
+
+    UPDATE public.ingredients i
+    SET current_stock = i.current_stock - agg.total_used
+    FROM (
+      SELECT r.ingredient_id, SUM(r.quantity_used * c.quantity) AS total_used
+      FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id AND p.business_id = v_business_id
+      JOIN public.recipes r ON r.product_id = c.product_id
+      GROUP BY r.ingredient_id
+    ) agg
+    WHERE i.id = agg.ingredient_id;
+
+    -- Credit each distinct referring affiliate for just the items in this
+    -- order that carried their code — never the whole order — unless the
+    -- shop hasn't opted in or the affiliate is the shop's own owner
+    -- (self-referral guard).
+    FOR v_ref_code IN
+      SELECT DISTINCT c.ref_code FROM _cart_items c
+      JOIN public.store_products p ON p.id = c.product_id
+      WHERE p.business_id = v_business_id AND c.ref_code IS NOT NULL
+    LOOP
+      v_ref_affiliate_id := NULL;
+      v_ref_commission_rate := NULL;
+
+      SELECT id, user_id INTO v_ref_affiliate_id, v_ref_affiliate_user_id
+        FROM public.affiliates WHERE code = v_ref_code AND status = 'approved';
+
+      CONTINUE WHEN v_ref_affiliate_id IS NULL;
+
+      SELECT owner_id INTO v_ref_business_owner FROM public.businesses WHERE id = v_business_id;
+
+      SELECT commission_rate INTO v_ref_commission_rate
+        FROM public.business_affiliate_settings
+        WHERE business_id = v_business_id AND enabled = true;
+
+      CONTINUE WHEN v_ref_commission_rate IS NULL OR v_ref_affiliate_user_id IS NOT DISTINCT FROM v_ref_business_owner;
+
+      SELECT COALESCE(SUM(c.quantity * p.price), 0) INTO v_ref_item_subtotal
+        FROM _cart_items c
+        JOIN public.store_products p ON p.id = c.product_id
+        WHERE p.business_id = v_business_id AND c.ref_code = v_ref_code;
+
+      INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, commission_rate, commission_amount, status)
+      VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_commission_rate, round(v_ref_item_subtotal * v_ref_commission_rate / 100, 2), 'pending')
+      ON CONFLICT (affiliate_id, order_id) DO NOTHING;
+    END LOOP;
+
+    v_order_ids := array_append(v_order_ids, v_order_id);
+  END LOOP;
+
+  RETURN QUERY SELECT * FROM public.store_orders WHERE id = ANY(v_order_ids);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.place_order(jsonb, text, text, text, text, text, numeric, numeric) TO authenticated;
+
+-- =============================================================================
+-- SECTION 13 — CANCELLATION INTEGRITY (fee-leakage guardrail)
+-- Without a payment gateway (money changes hands off-platform, e.g. COD),
+-- platform fee collection depends entirely on the business honestly running
+-- an order through to 'completed'. A dishonest business can always cancel
+-- an order in-system and just... still deliver it, pocketing the whole
+-- amount with no platform cut. No in-app lock can prevent that outright —
+-- the fulfillment happens entirely outside anything this schema can see —
+-- so this section doesn't try to. What it does instead:
+--
+--   1. Let the customer contradict a false 'cancelled' status.
+--      report_cancelled_order() below — the customer already has the goods,
+--      so they have no incentive to lie here. Routed through the exact same
+--      'disputed' -> admin_resolve_order() pipeline as SECTION 11, just
+--      flagged (disputed_from_cancellation) so admin can tell it apart from
+--      an ordinary awaiting_confirmation dispute.
+--   2. Surface the pattern, not just the individual report. One report
+--      could be a genuine mixup; a business with several is the actual
+--      fraud signal. business_cancellation_reports below aggregates that
+--      for admin review rather than trusting every cancel as final and inert.
+--   3. Require a reason on every plain cancel (see cancellation_reason,
+--      enforced by trg_enforce_order_status_rules in SECTION 11), shown to
+--      the customer. Doesn't stop a determined bad actor, but removes the
+--      silent version of the scam — the customer at least sees there was
+--      ever a discrepancy to report in the first place.
+--
+-- The remaining piece — that circumventing the platform on a placed order
+-- is a bannable/finable offense once caught via #1 or #2 — is a policy
+-- matter for the terms of service, not something a schema can enforce.
+-- =============================================================================
+
+-- The customer's side of #1 above: "this shows cancelled, but I actually
+-- got it." Reuses the same 'disputed' status and admin_resolve_order()
+-- resolution as a normal dispute — only the entry point differs.
+CREATE OR REPLACE FUNCTION public.report_cancelled_order(p_order_id uuid, p_reason text)
+RETURNS public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_order public.store_orders;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_reason IS NULL OR length(trim(p_reason)) = 0 THEN
+    RAISE EXCEPTION 'Please describe what happened';
+  END IF;
+
+  SELECT * INTO v_order FROM public.store_orders WHERE id = p_order_id AND customer_id = v_uid FOR UPDATE;
+
+  IF v_order.id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  IF v_order.status <> 'cancelled' THEN
+    RAISE EXCEPTION 'Only a cancelled order can be reported this way';
+  END IF;
+
+  PERFORM set_config('app.order_transition_allowed', 'true', true);
+  UPDATE public.store_orders
+  SET status = 'disputed', dispute_reason = trim(p_reason), disputed_from_cancellation = true
+  WHERE id = p_order_id
+  RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.report_cancelled_order(uuid, text) TO authenticated;
+
+-- #2 above: per-business count of orders a customer has reported this way,
+-- regardless of how admin ultimately resolved each one — even a report
+-- later resolved back to 'cancelled' is worth admin seeing again if it
+-- keeps happening for the same business. security_invoker means this runs
+-- under the querying user's own store_orders/businesses RLS, so in practice
+-- only super_admin (who can see every order) gets the real aggregate — the
+-- admin orders page is what actually reads this.
+CREATE OR REPLACE VIEW public.business_cancellation_reports
+WITH (security_invoker = true) AS
+SELECT
+  b.id AS business_id,
+  b.name AS business_name,
+  b.slug AS business_slug,
+  count(*) FILTER (WHERE o.disputed_from_cancellation) AS reported_count
+FROM public.store_orders o
+JOIN public.businesses b ON b.id = o.business_id
+GROUP BY b.id, b.name, b.slug
+HAVING count(*) FILTER (WHERE o.disputed_from_cancellation) > 0;
+
+GRANT SELECT ON public.business_cancellation_reports TO authenticated;

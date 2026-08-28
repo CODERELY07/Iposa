@@ -1,10 +1,12 @@
 import { Badge } from '@/components/ui/badge'
+import { Store, Truck } from 'lucide-react'
 import type {
   OrderStatus,
   BusinessStatus,
   AffiliateStatus,
   AffiliateCommissionStatus,
   AffiliatePayoutStatus,
+  FulfillmentMethod,
 } from '@/lib/types/marketplace'
 
 // One color per semantic meaning, reused across every status pill in the
@@ -34,8 +36,15 @@ const ORDER_STYLES: Record<OrderStatus, string> = {
   disputed: BAD,
   cancelled: BAD,
 }
+// 'awaiting_confirmation' reads as "out for delivery" everywhere it's shown —
+// the enum value stays for continuity with existing rows/queries, but the
+// business no longer separately "ships" then "marks done"; setting this
+// status directly is both at once (see SECTION 11 in database_schema.sql).
+const ORDER_LABELS: Partial<Record<OrderStatus, string>> = {
+  awaiting_confirmation: 'out for delivery',
+}
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  return <StatusPill label={status.replace(/_/g, ' ')} className={ORDER_STYLES[status]} />
+  return <StatusPill label={ORDER_LABELS[status] ?? status.replace(/_/g, ' ')} className={ORDER_STYLES[status]} />
 }
 
 const APPLICATION_STYLES: Record<BusinessStatus | AffiliateStatus, string> = {
@@ -64,4 +73,13 @@ const PAYOUT_STYLES: Record<AffiliatePayoutStatus, string> = {
 }
 export function PayoutStatusBadge({ status }: { status: AffiliatePayoutStatus }) {
   return <StatusPill label={status} className={PAYOUT_STYLES[status]} />
+}
+
+export function FulfillmentBadge({ method }: { method: FulfillmentMethod }) {
+  const Icon = method === 'pickup' ? Store : Truck
+  return (
+    <Badge variant="outline" className="font-mono uppercase tracking-wider text-muted-foreground">
+      <Icon /> {method}
+    </Badge>
+  )
 }

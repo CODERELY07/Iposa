@@ -4,15 +4,20 @@ import { createClient, requireApprovedBusiness } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import type { OrderStatus } from '@/lib/types/marketplace'
 
-// Only the pre-confirmation statuses are reachable this way — the database's
-// own store_orders UPDATE policy rejects 'awaiting_confirmation', 'completed',
-// and 'disputed' from a business owner regardless of what this action sends,
-// so this check just gives a clearer error than a raw RLS failure would.
-const DIRECTLY_SETTABLE: OrderStatus[] = ['pending', 'paid', 'processing', 'shipped', 'cancelled']
+// 'awaiting_confirmation' is directly settable now — opening the customer's
+// confirmation window used to be a separate "mark as done" RPC
+// (request_order_completion()), which let the business choose the moment
+// it became answerable to the customer. It's just another status now; the
+// database's own trg_stamp_awaiting_confirmation stamps the timestamp, and
+// trg_enforce_order_status_rules is what actually stops the business from
+// reversing it afterward — not this allowlist. 'cancelled' goes through
+// cancelOrderAction below instead, since it requires a reason this path has
+// nowhere to carry.
+const DIRECTLY_SETTABLE: OrderStatus[] = ['pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation']
 
 export async function updateOrderStatusAction(orderId: string, status: OrderStatus) {
   if (!DIRECTLY_SETTABLE.includes(status)) {
-    throw new Error(`Use "Mark as done" to move an order to ${status.replace(/_/g, ' ')}.`)
+    throw new Error(`Can't set an order to ${status.replace(/_/g, ' ')} directly.`)
   }
 
   const business = await requireApprovedBusiness()
@@ -29,13 +34,25 @@ export async function updateOrderStatusAction(orderId: string, status: OrderStat
   revalidatePath('/sell/orders')
 }
 
-// The business claims the order is done. Opens the customer's confirmation
-// window instead of finalizing anything itself — see request_order_completion()
-// in database_schema.sql.
-export async function requestOrderCompletionAction(orderId: string) {
+// Cancelling always requires a reason — see cancellation_reason and
+// trg_enforce_order_status_rules in database_schema.sql. It's shown to the
+// customer, and it's the record a customer can later contradict via
+// report_cancelled_order() if the order shows cancelled but actually
+// arrived — the platform's only real signal against cancel-but-still-fulfill
+// without a payment gateway in the loop.
+export async function cancelOrderAction(orderId: string, reason: string) {
+  if (!reason.trim()) {
+    return { success: false as const, message: 'A cancellation reason is required.' }
+  }
+
+  const business = await requireApprovedBusiness()
   const supabase = await createClient()
 
-  const { error } = await supabase.rpc('request_order_completion', { p_order_id: orderId })
+  const { error } = await supabase
+    .from('store_orders')
+    .update({ status: 'cancelled', cancellation_reason: reason.trim() })
+    .eq('id', orderId)
+    .eq('business_id', business.id)
 
   if (error) {
     return { success: false as const, message: error.message }

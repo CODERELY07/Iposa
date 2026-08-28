@@ -2,18 +2,21 @@
 
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
-import type { OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
+import type { FulfillmentMethod, OrderStatus, StoreOrderItem } from '@/lib/types/marketplace'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/confirm-dialog'
-import { OrderStatusBadge } from '@/components/marketplace/StatusBadge'
-import { ShieldAlert, Clock3, PackageX } from 'lucide-react'
+import { OrderStatusBadge, FulfillmentBadge } from '@/components/marketplace/StatusBadge'
+import { ShieldAlert, Clock3, PackageX, Ban, Flag } from 'lucide-react'
 
 type OrderRow = {
   id: string
   status: OrderStatus
   total: number
+  fulfillment_method: FulfillmentMethod
   dispute_reason: string | null
+  disputed_from_cancellation: boolean
+  cancellation_reason: string | null
   awaiting_confirmation_at: string | null
   created_at: string
   businesses: { name: string; slug: string } | null
@@ -74,12 +77,26 @@ export default function AdminOrdersClient({
                 <p className="text-[11px] text-muted-foreground">{new Date(order.created_at).toLocaleString()}</p>
               </div>
               <div className="flex items-center gap-2">
+                <FulfillmentBadge method={order.fulfillment_method} />
                 <OrderStatusBadge status={order.status} />
                 <span className="font-mono text-sm font-bold text-foreground">₱{Number(order.total).toFixed(2)}</span>
               </div>
             </div>
 
-            {order.status === 'disputed' && order.dispute_reason && (
+            {order.status === 'disputed' && order.disputed_from_cancellation && (
+              <div className="flex items-start gap-2 border-b bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+                <Flag className="size-3.5 shrink-0 translate-y-0.5" />
+                <div>
+                  <p className="font-semibold">Customer reports this shows cancelled but was actually received.</p>
+                  {order.dispute_reason && <p className="mt-0.5">They said: &quot;{order.dispute_reason}&quot;</p>}
+                  {order.cancellation_reason && (
+                    <p className="mt-0.5">Business&apos;s stated cancel reason: &quot;{order.cancellation_reason}&quot;</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {order.status === 'disputed' && !order.disputed_from_cancellation && order.dispute_reason && (
               <div className="flex items-start gap-2 border-b bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
                 <ShieldAlert className="size-3.5 shrink-0 translate-y-0.5" />
                 <span>Customer said: &quot;{order.dispute_reason}&quot;</span>
@@ -89,7 +106,14 @@ export default function AdminOrdersClient({
             {order.status === 'awaiting_confirmation' && (
               <div className="flex items-start gap-2 border-b bg-amber-50 px-4 py-2.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400">
                 <Clock3 className="size-3.5 shrink-0 translate-y-0.5" />
-                <span>Business marked this done — waiting on the customer, or force it below.</span>
+                <span>Business marked this out for delivery — waiting on the customer, or force it below.</span>
+              </div>
+            )}
+
+            {order.status === 'cancelled' && order.cancellation_reason && (
+              <div className="flex items-start gap-2 border-b bg-muted/50 px-4 py-2.5 text-xs text-muted-foreground">
+                <Ban className="size-3.5 shrink-0 translate-y-0.5" />
+                <span>Business cancelled: &quot;{order.cancellation_reason}&quot;</span>
               </div>
             )}
 

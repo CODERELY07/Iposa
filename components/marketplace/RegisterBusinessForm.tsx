@@ -7,19 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, Loader2, UtensilsCrossed, Wrench, Package, Check } from 'lucide-react'
+import { AlertCircle, Loader2, Check } from 'lucide-react'
 import { BUSINESS_TYPE_OPTIONS, getBusinessTypeMeta } from '@/lib/business/type-meta'
 import type { BusinessType } from '@/lib/types/marketplace'
-
-// Every business type shares the exact same product/recipe/POS machinery —
-// this choice only decides its vocabulary and which panels show up (see
-// lib/business/type-meta.ts). It's asked once, up front, because the whole
-// /sell dashboard is built around the answer.
-const TYPE_ICONS: Record<BusinessType, typeof Wrench> = {
-  restaurant: UtensilsCrossed,
-  services: Wrench,
-  retail: Package,
-}
 
 export default function RegisterBusinessForm() {
   const [isPending, startTransition] = useTransition()
@@ -54,7 +44,7 @@ export default function RegisterBusinessForm() {
         <Label>What kind of business is this? *</Label>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {BUSINESS_TYPE_OPTIONS.map(opt => {
-            const Icon = TYPE_ICONS[opt.value]
+            const Icon = opt.Icon
             const active = businessType === opt.value
             return (
               <label

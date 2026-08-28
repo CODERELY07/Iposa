@@ -3,15 +3,22 @@ import { createClient } from '@/lib/supabase/server'
 import ProductCard from '@/components/marketplace/ProductCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Sparkles, PackageX, Store, PackageSearch } from 'lucide-react'
-import type { MarketplaceProduct } from '@/lib/types/marketplace'
+import { Sparkles, PackageX, Store, PackageSearch, LayoutGrid } from 'lucide-react'
+import { BUSINESS_TYPE_OPTIONS, getBusinessTypeMeta } from '@/lib/business/type-meta'
+import type { BusinessType, MarketplaceProduct } from '@/lib/types/marketplace'
 
 type SearchParams = {
+  type?: string
   category?: string
   business?: string
   min_price?: string
   max_price?: string
   q?: string
+}
+
+const BUSINESS_TYPES = BUSINESS_TYPE_OPTIONS.map(o => o.value)
+function isBusinessType(value: string | undefined): value is BusinessType {
+  return BUSINESS_TYPES.includes(value as BusinessType)
 }
 
 export const revalidate = 0
@@ -35,34 +42,84 @@ export default async function MarketplaceHomePage({
   const params = await searchParams
   const supabase = await createClient()
 
+  // The type switcher below is a coarser, higher-priority facet than
+  // category/shop/price — it's *which storefront vertical* you're in, not a
+  // refinement within one — so it gets validated and applied first, and the
+  // category/shop pickers get scoped to whatever's actually in that vertical
+  // further down. Same reasoning restaurants/grocery/retail apps split
+  // themselves into separate top-level tabs instead of one flat filter list.
+  const activeType = isBusinessType(params.type) ? params.type : undefined
+
   let query = supabase.from('marketplace_products').select('*').order('created_at', { ascending: false })
 
+  if (activeType) query = query.eq('business_type', activeType)
   if (params.category) query = query.eq('category_slug', params.category)
   if (params.business) query = query.eq('business_slug', params.business)
   if (params.min_price) query = query.gte('price', Number(params.min_price))
   if (params.max_price) query = query.lte('price', Number(params.max_price))
   if (params.q) query = query.ilike('name', `%${params.q}%`)
 
+  let businessQuery = supabase
+    .from('businesses')
+    .select('id, name, slug, description, logo_url, business_type')
+    .eq('status', 'approved')
+    .order('name')
+  if (activeType) businessQuery = businessQuery.eq('business_type', activeType)
+
+  // Category chips/dropdown only offer categories that actually have
+  // something in the current vertical — an "Everything" list of categories
+  // is fine when browsing everything, but once you're in Services, a
+  // "Beverages" chip that leads to zero results every time is just a
+  // dead end. Cheap enough to skip entirely when no type is selected.
+  let categoryScope = supabase
+    .from('marketplace_products')
+    .select('category_id, category_name, category_slug')
+  if (activeType) categoryScope = categoryScope.eq('business_type', activeType)
+
   const [
     { data: products, error },
-    { data: categories },
+    { data: categoryRows },
     { data: businesses },
     { count: totalProductCount },
     { count: approvedShopCount },
+    { count: restaurantCount },
+    { count: servicesCount },
+    { count: retailCount },
   ] = await Promise.all([
     query,
-    supabase.from('categories').select('id, name, slug').not('slug', 'is', null).order('name'),
-    supabase
-      .from('businesses')
-      .select('id, name, slug, description, logo_url')
-      .eq('status', 'approved')
-      .order('name'),
+    categoryScope,
+    businessQuery,
     supabase.from('marketplace_products').select('*', { count: 'exact', head: true }),
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'approved'),
+    supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'restaurant'),
+    supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'services'),
+    supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'retail'),
   ])
 
-  const hasFilters = Boolean(params.category || params.business || params.min_price || params.max_price || params.q)
-  const activeCategory = (categories ?? []).find(c => c.slug === params.category)
+  const typeCounts: Record<BusinessType, number> = {
+    restaurant: restaurantCount ?? 0,
+    services: servicesCount ?? 0,
+    retail: retailCount ?? 0,
+  }
+
+  // Deduped in JS rather than a second round trip / a dedicated view — the
+  // category taxonomy is small (see SECTION 3 in database_schema.sql), so
+  // this is a handful of rows, not a performance concern.
+  const categories = Array.from(
+    new Map(
+      (categoryRows ?? [])
+        .filter((r): r is { category_id: number; category_name: string; category_slug: string } =>
+          r.category_id != null && r.category_slug != null && r.category_name != null
+        )
+        .map(r => [r.category_slug, { id: r.category_id, name: r.category_name, slug: r.category_slug }])
+    ).values()
+  ).sort((a, b) => a.name.localeCompare(b.name))
+
+  const hasFilters = Boolean(
+    activeType || params.category || params.business || params.min_price || params.max_price || params.q
+  )
+  const activeCategory = categories.find(c => c.slug === params.category)
+  const activeTypeMeta = activeType ? getBusinessTypeMeta(activeType) : undefined
   const list = (products as MarketplaceProduct[]) ?? []
   const featuredShops = (businesses ?? []).slice(0, 3)
 
@@ -71,7 +128,7 @@ export default async function MarketplaceHomePage({
   function buildHref(overrides: Partial<SearchParams>) {
     const merged = { ...params, ...overrides }
     const sp = new URLSearchParams()
-    ;(['q', 'category', 'business', 'min_price', 'max_price'] as const).forEach(key => {
+    ;(['q', 'type', 'category', 'business', 'min_price', 'max_price'] as const).forEach(key => {
       const value = merged[key]
       if (value) sp.set(key, value)
     })
@@ -171,14 +228,75 @@ export default async function MarketplaceHomePage({
         </div>
       </section>
 
-      {/* Category chips */}
+      {/* Browse by type — the marketplace's three storefront verticals.
+          This is a coarser facet than category (which shop's kitchen/shelf/
+          workbench you're even looking at, not a refinement within one), so
+          it gets its own tile row above the category pills instead of being
+          folded into the same control — the same reason a food-delivery app
+          puts "Restaurants vs. Grocery" in its own top-level switcher rather
+          than as just another filter chip. */}
+      <section className="border-b border-border bg-background">
+        <div className="mx-auto max-w-310 px-4 py-9 sm:px-7">
+          <div className="mb-4.5 flex items-baseline justify-between gap-4">
+            <h2 className="font-serif text-2xl font-normal tracking-[-0.01em] text-foreground">Browse by type</h2>
+            {activeType && (
+              <Link href={buildHref({ type: '' })} className="label-mono text-primary hover:underline">
+                Clear
+              </Link>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+            <Link
+              href={buildHref({ type: '' })}
+              className={`card-interactive flex flex-col gap-3 rounded-[14px] border p-4 ${
+                !activeType ? 'border-primary/60 bg-gradient-brand-soft shadow-glow-primary' : 'border-border bg-card'
+              }`}
+            >
+              <span className={`flex size-9 items-center justify-center rounded-lg ${!activeType ? 'bg-gradient-brand text-white' : 'bg-muted text-muted-foreground'}`}>
+                <LayoutGrid className="size-4.5" />
+              </span>
+              <div>
+                <div className="text-[15px] font-semibold text-foreground">All types</div>
+                <div className="text-[12.5px] leading-snug text-muted-foreground">Every shop, one feed</div>
+              </div>
+              <div className="label-mono mt-auto text-[11px]">{totalProductCount ?? 0} listed</div>
+            </Link>
+
+            {BUSINESS_TYPE_OPTIONS.map(opt => {
+              const Icon = opt.Icon
+              const active = activeType === opt.value
+              return (
+                <Link
+                  key={opt.value}
+                  href={buildHref({ type: opt.value })}
+                  className={`card-interactive flex flex-col gap-3 rounded-[14px] border p-4 ${
+                    active ? 'border-primary/60 bg-gradient-brand-soft shadow-glow-primary' : 'border-border bg-card'
+                  }`}
+                >
+                  <span className={`flex size-9 items-center justify-center rounded-lg ${active ? 'bg-gradient-brand text-white' : 'bg-muted text-muted-foreground'}`}>
+                    <Icon className="size-4.5" />
+                  </span>
+                  <div>
+                    <div className="text-[15px] font-semibold text-foreground">{opt.shortLabel}</div>
+                    <div className="text-[12.5px] leading-snug text-muted-foreground">{opt.tagline}</div>
+                  </div>
+                  <div className="label-mono mt-auto text-[11px]">{typeCounts[opt.value]} listed</div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Category chips — a refinement within whichever type (or "Everything")
+          is currently selected above; options are scoped to it server-side. */}
       <section className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-310 items-center gap-2.5 overflow-x-auto px-4 py-5.5 sm:px-7">
           <span className="label-mono shrink-0 pr-1.5">Shop by</span>
           <Link href={buildHref({ category: '' })} className={chipClass(!params.category)}>
             Everything
           </Link>
-          {(categories ?? []).map(c => (
+          {categories.map(c => (
             <Link key={c.id} href={buildHref({ category: c.slug ?? '' })} className={chipClass(params.category === c.slug)}>
               {c.name}
             </Link>
@@ -189,6 +307,11 @@ export default async function MarketplaceHomePage({
       <div id="browse" className="mx-auto max-w-310 px-4 py-8.5 pb-20 sm:px-7">
         <div className="sticky top-16.5 z-10 -mx-4 mb-1.5 border-b border-border bg-background px-4 py-3 sm:-mx-7 sm:px-7">
           <form className="grid grid-cols-2 items-end gap-2.5 sm:grid-cols-[1.6fr_1fr_1fr_0.8fr_0.8fr_auto]">
+            {/* Not a field anyone edits here — the type switcher above owns
+                it — but a plain GET form only ever submits its own named
+                fields, so without this a category/price tweak here would
+                silently drop out of whichever vertical you're browsing. */}
+            <input type="hidden" name="type" value={activeType ?? ''} />
             <div className="col-span-2 space-y-1.5 sm:col-span-1">
               <label className="label-mono block">Search</label>
               <Input key={params.q ?? ''} type="text" name="q" defaultValue={params.q ?? ''} placeholder="Product name…" className="h-9.5 text-sm" />
@@ -198,7 +321,7 @@ export default async function MarketplaceHomePage({
               <label className="label-mono block">Category</label>
               <select name="category" defaultValue={params.category ?? ''} className={fieldClass}>
                 <option value="">All categories</option>
-                {(categories ?? []).map(c => (
+                {categories.map(c => (
                   <option key={c.id} value={c.slug ?? ''}>{c.name}</option>
                 ))}
               </select>
@@ -240,7 +363,9 @@ export default async function MarketplaceHomePage({
 
         <div className="my-5.5 flex items-baseline justify-between gap-4">
           <h2 className="font-serif text-[29px] font-normal tracking-[-0.01em] text-foreground">
-            {activeCategory ? activeCategory.name : 'Fresh on the marketplace'}
+            {activeTypeMeta && activeCategory
+              ? <>{activeCategory.name} <span className="text-muted-foreground">in {activeTypeMeta.shortLabel}</span></>
+              : activeTypeMeta?.shortLabel ?? activeCategory?.name ?? 'Fresh on the marketplace'}
           </h2>
           <span className="label-mono shrink-0 text-[11.5px] tracking-[0.06em]">
             {list.length} {list.length === 1 ? 'product' : 'products'}
@@ -277,7 +402,7 @@ export default async function MarketplaceHomePage({
         <section className="border-t border-border bg-card">
           <div className="mx-auto max-w-310 px-4 py-17.5 sm:px-7">
             <h2 className="mb-6.5 font-serif text-[34px] font-normal tracking-[-0.015em] text-foreground">
-              Shops worth following
+              {activeTypeMeta ? `${activeTypeMeta.shortLabel} shops worth following` : 'Shops worth following'}
             </h2>
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {featuredShops.map(shop => (
