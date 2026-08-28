@@ -48,6 +48,13 @@ export async function updateBusinessLocationAction(payload: {
   const business = await requireApprovedBusiness()
   const supabase = await createClient()
 
+  // Required, not optional — mirrors the client-side check in
+  // BusinessLocationForm; re-checked here since a server action is a public
+  // endpoint regardless of what the form UI allows.
+  if (payload.location_lat == null || payload.location_lng == null) {
+    return { success: false as const, message: 'A map pin is required for your pickup location.' }
+  }
+
   const { error } = await supabase
     .from('businesses')
     .update({

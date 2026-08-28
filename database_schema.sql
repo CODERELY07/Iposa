@@ -105,10 +105,14 @@ CREATE TABLE IF NOT EXISTS public.businesses (
   -- Set from Shop Settings via MapLocationPicker (the same free
   -- Leaflet/OpenStreetMap+Nominatim flow checkout uses for a delivery pin —
   -- see components/marketplace/MapLocationPicker.tsx) rather than at
-  -- registration: a business may not know/need this until it actually
-  -- turns pickup on. All three are optional and shown together — a shop
-  -- with an address but no pin still displays the address; store_orders'
-  -- own shipping_lat/lng are a separate, per-order concept and unaffected.
+  -- registration: a business may not know this until it fills out Shop
+  -- Settings. Nullable here (existing rows predate this, and registration
+  -- doesn't collect it) but location_lat/lng are enforced as required by the
+  -- app layer — see BusinessLocationForm/updateBusinessLocationAction —
+  -- since checkout always lets a customer choose 'pickup' for any business,
+  -- there's no per-business case where the pin is genuinely optional.
+  -- store_orders' own shipping_lat/lng are a separate, per-order concept and
+  -- unaffected.
   address text,
   location_lat numeric(9,6),
   location_lng numeric(9,6),
@@ -2253,6 +2257,14 @@ BEGIN
 
   IF p_fulfillment_method = 'delivery' AND (p_shipping_address IS NULL OR length(trim(p_shipping_address)) = 0) THEN
     RAISE EXCEPTION 'Delivery address is required';
+  END IF;
+
+  -- A map pin, not just typed text, is required for delivery — the whole
+  -- point being an accurate lat/lng to route the order by, not just an
+  -- address string. Mirrors the client-side check in CheckoutForm/checkout
+  -- actions.ts; enforced here too since this function is callable directly.
+  IF p_fulfillment_method = 'delivery' AND (p_shipping_lat IS NULL OR p_shipping_lng IS NULL) THEN
+    RAISE EXCEPTION 'Delivery location pin is required';
   END IF;
 
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN

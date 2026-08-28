@@ -18,6 +18,14 @@ export async function placeOrderAction(
 ) {
   const supabase = await createClient()
 
+  // Required, not optional, for delivery — mirrors the client-side check in
+  // CheckoutForm; re-checked here since a server action is a public endpoint
+  // regardless of what the form UI allows. place_order() also enforces this
+  // (belt-and-suspenders), but failing fast here skips the RPC round-trip.
+  if (shipping.fulfillmentMethod === 'delivery' && (shipping.lat == null || shipping.lng == null)) {
+    return { success: false as const, message: 'Confirm your exact delivery location on the map before placing your order.' }
+  }
+
   // Each item's ref_code (if any) was stamped client-side at the moment it
   // was added to the cart from a specific product's page — see
   // ProductPageActions. place_order() only credits the items that actually

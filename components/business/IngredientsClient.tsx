@@ -13,13 +13,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import ConfirmDialog from '@/components/ui/confirm-dialog'
 import { AlertCircle, Soup } from 'lucide-react'
-import type { BusinessTypeMeta } from '@/lib/business/type-meta'
+import { getBusinessTypeMeta } from '@/lib/business/type-meta'
 import { UNIT_TYPES, unitLabel, type UnitType } from '@/lib/business/units'
+import type { BusinessType } from '@/lib/types/marketplace'
 
 type Props = {
   businessId: string
   initialIngredients: Ingredient[]
-  materialMeta: BusinessTypeMeta
+  businessType: BusinessType
   onIngredientsChanged?: () => void // Optional callback to trigger a parent page refresh
 }
 
@@ -27,7 +28,12 @@ function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-export default function IngredientsClient({ businessId, initialIngredients, materialMeta, onIngredientsChanged }: Props) {
+export default function IngredientsClient({ businessId, initialIngredients, businessType, onIngredientsChanged }: Props) {
+  // Server Components can't hand a Client Component the meta object itself
+  // (it carries a lucide Icon component, which isn't serializable across the
+  // boundary) — so, like ProductsClient/AnalyticsClient/PosClient, we pass
+  // just the plain businessType string and recompute the meta here.
+  const materialMeta = getBusinessTypeMeta(businessType)
   const singular = cap(materialMeta.materialLabelSingular)
   const supabase = createClient()
   const [ingredients, setIngredients] = useState<Ingredient[]>(initialIngredients)

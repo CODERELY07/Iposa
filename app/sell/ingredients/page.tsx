@@ -39,7 +39,7 @@ export default async function SellIngredientsPage() {
         </div>
       </div>
 
-      <IngredientsClient businessId={business.id} initialIngredients={ingredients ?? []} materialMeta={meta} />
+      <IngredientsClient businessId={business.id} initialIngredients={ingredients ?? []} businessType={business.business_type} />
     </div>
   )
 }

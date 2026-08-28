@@ -12,8 +12,10 @@ import MapLocationPicker from '@/components/marketplace/MapLocationPicker'
 import { AlertCircle, Loader2, MapPinned, X } from 'lucide-react'
 
 // Powers the pickup address/map shown to a customer once they place a
-// 'pickup' order (see the customer's orders page and the shop page) — never
-// required, since a shop that only delivers has no use for it.
+// 'pickup' order (see the customer's orders page and the shop page).
+// Required, not optional: checkout always lets a customer pick 'pickup' for
+// any business (there's no per-business toggle to turn that option off), so
+// every business needs an accurate pin here for that order to be usable.
 export default function BusinessLocationForm({ business }: { business: Business }) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -24,9 +26,16 @@ export default function BusinessLocationForm({ business }: { business: Business 
     lng: business.location_lng,
   })
 
+  const needsPin = form.lat == null || form.lng == null
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
+    if (needsPin) {
+      setError('Set your exact pickup location on the map before saving.')
+      return
+    }
 
     startTransition(async () => {
       const result = await updateBusinessLocationAction({
@@ -85,12 +94,12 @@ export default function BusinessLocationForm({ business }: { business: Business 
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            No pin set — customers picking up will only see the address text above, if any.
+            Required — tap &quot;Set on map&quot; above to pin your exact pickup location.
           </p>
         )}
       </div>
 
-      <Button type="submit" disabled={isPending}>
+      <Button type="submit" disabled={isPending || needsPin}>
         {isPending && <Loader2 className="animate-spin" />}
         {isPending ? 'Saving…' : 'Save location'}
       </Button>

@@ -7,7 +7,7 @@ import { searchAddress, reverseGeocode, type GeocodeResult } from '@/lib/marketp
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, MapPin, Search } from 'lucide-react'
+import { LocateFixed, Loader2, MapPin, Search } from 'lucide-react'
 
 // Free "confirm on map" step, built on Leaflet + OpenStreetMap tiles and
 // Nominatim search/reverse-geocoding — the cheaper middle ground the address
@@ -59,6 +59,8 @@ export default function MapLocationPicker({
     initialLat != null && initialLng != null ? { lat: initialLat, lng: initialLng } : null
   )
   const [confirming, setConfirming] = useState(false)
+  const [locating, setLocating] = useState(false)
+  const [locateError, setLocateError] = useState<string | null>(null)
 
   // A query shorter than Nominatim's own minimum just means "nothing to
   // show yet" — computed at render time instead of synced into state, so
@@ -168,6 +170,45 @@ export default function MapLocationPicker({
     mapRef.current?.setView([lat, lng], PIN_ZOOM)
   }
 
+  // "Use my current location" — asks the browser for the device's actual GPS
+  // fix (accurate to a few meters outdoors) rather than relying only on a
+  // typed search or a manually-dragged pin, which is what "accurate" here
+  // actually depends on. Purely opt-in: nothing calls this until the user
+  // taps the button, so there's no surprise permission prompt.
+  function handleUseCurrentLocation() {
+    if (!('geolocation' in navigator)) {
+      setLocateError("This browser can't share your location — search or drag the pin instead.")
+      return
+    }
+    setLocateError(null)
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const { latitude, longitude } = pos.coords
+        flyTo(latitude, longitude)
+        skipNextSearchRef.current = true
+        setResults([])
+        reverseGeocode(latitude, longitude)
+          .then(address => {
+            if (address) {
+              skipNextSearchRef.current = true
+              setQuery(address)
+            }
+          })
+          .finally(() => setLocating(false))
+      },
+      err => {
+        setLocating(false)
+        setLocateError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location access denied — enable it for this site in your browser settings, or search/drag the pin instead.'
+            : 'Could not determine your location — search or drag the pin instead.'
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  }
+
   function handleConfirm() {
     if (!position) return
     setConfirming(true)
@@ -187,15 +228,29 @@ export default function MapLocationPicker({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="Search for a street, barangay, or landmark…"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              placeholder="Search for a street, barangay, or landmark…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0 gap-1.5"
+            disabled={locating}
+            onClick={handleUseCurrentLocation}
+          >
+            {locating ? <Loader2 className="size-4 animate-spin" /> : <LocateFixed className="size-4" />}
+            <span className="hidden sm:inline">Use my location</span>
+          </Button>
         </div>
+
+        {locateError && <p className="text-xs text-destructive">{locateError}</p>}
 
         {queryReady && searching && (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

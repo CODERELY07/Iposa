@@ -32,10 +32,16 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
   })
 
   const isDelivery = form.fulfillmentMethod === 'delivery'
+  const needsPin = isDelivery && (form.lat == null || form.lng == null)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+
+    if (needsPin) {
+      setError('Confirm your exact delivery location on the map before placing your order.')
+      return
+    }
 
     startTransition(async () => {
       const result = await placeOrderAction(items, {
@@ -126,7 +132,7 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
             value={form.address}
             onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
           />
-          {form.lat != null && form.lng != null && (
+          {form.lat != null && form.lng != null ? (
             <p className="flex items-center gap-1 text-xs text-muted-foreground">
               <MapPinned className="size-3 text-primary" /> Location pinned on map
               <button
@@ -137,6 +143,10 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
                 <X className="size-3" />
                 <span className="sr-only">Clear pin</span>
               </button>
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Required — tap &quot;Confirm on map&quot; above to pin your exact location so delivery is accurate.
             </p>
           )}
         </div>
@@ -163,7 +173,7 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
         <span className="text-sm text-muted-foreground">
           Total: <span className="font-mono text-lg font-bold text-foreground">₱{totalPrice.toFixed(2)}</span>
         </span>
-        <Button type="submit" size="lg" disabled={isPending || items.length === 0}>
+        <Button type="submit" size="lg" disabled={isPending || items.length === 0 || needsPin}>
           {isPending && <Loader2 className="animate-spin" />}
           {isPending ? 'Placing order…' : 'Place order'}
         </Button>
