@@ -341,7 +341,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
       </Card>
 
       <Dialog open={modalOpen} onOpenChange={open => !open && closeModal()}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-xl">
+        <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{editing ? `Edit ${meta.catalogLabelSingular}` : `Add ${meta.catalogLabelSingular}`}</DialogTitle>
             <DialogDescription>
@@ -457,7 +457,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
               <h3 className="mb-1 text-xs font-bold font-mono uppercase tracking-wider text-foreground">{meta.recipeLabel} Construction</h3>
               <p className="mb-3 text-[10px] text-muted-foreground">Adding {meta.materialLabelSingular}s locks manual stock and computes available units from your {meta.materialLabel.toLowerCase()} inventory.</p>
 
-              <div className="mb-3 flex items-end gap-2 rounded-lg border bg-muted/40 p-2">
+              <div className="mb-3 flex flex-col gap-2 rounded-lg border bg-muted/40 p-2 sm:flex-row sm:items-end">
                 <div className="flex-1 space-y-1">
                   <Label className="text-[10px] font-bold uppercase text-muted-foreground">{meta.materialLabelSingular}</Label>
                   <Select value={selectedIngredientId} onValueChange={v => setSelectedIngredientId(v ?? '')}>
@@ -471,11 +471,13 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="w-24 space-y-1">
-                  <Label className="text-[10px] font-bold uppercase text-muted-foreground">Qty</Label>
-                  <Input type="number" step="0.01" placeholder="Amt" value={quantityUsed} onChange={e => setQuantityUsed(e.target.value)} className="bg-background font-mono" />
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1 sm:w-24 sm:flex-none">
+                    <Label className="text-[10px] font-bold uppercase text-muted-foreground">Qty</Label>
+                    <Input type="number" step="0.01" placeholder="Amt" value={quantityUsed} onChange={e => setQuantityUsed(e.target.value)} className="bg-background font-mono" />
+                  </div>
+                  <Button type="button" size="icon" onClick={addIngredientToRecipe} className="shrink-0"><Plus /></Button>
                 </div>
-                <Button type="button" size="icon" onClick={addIngredientToRecipe}><Plus /></Button>
               </div>
 
               <div className="max-h-32 space-y-1.5 overflow-y-auto">

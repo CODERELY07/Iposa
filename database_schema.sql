@@ -426,18 +426,47 @@ CREATE TABLE IF NOT EXISTS public.store_orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   customer_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled')),
+  -- 'awaiting_confirmation': the business says it's done, but that alone
+  -- never finalizes anything — see request_order_completion() in SECTION 11.
+  -- 'disputed': the customer rejected that claim; routed to super_admin.
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation', 'completed', 'disputed', 'cancelled')),
   subtotal numeric(10,2) NOT NULL DEFAULT 0,
   total numeric(10,2) NOT NULL DEFAULT 0,
   shipping_name text,
   shipping_phone text,
   shipping_address text,
   notes text,
+  -- Stamped by request_order_completion() when the business claims the order
+  -- is done; auto_confirm_stale_orders() uses it to finalize the order on its
+  -- own once order_confirmation_window() has passed with no customer response.
+  awaiting_confirmation_at timestamptz,
+  -- Filled in by dispute_order_completion() — the customer's own account of
+  -- what went wrong, shown to super_admin when resolving the dispute.
+  dispute_reason text,
+  -- Snapshotted onto the order (not just computed on the fly) at the same
+  -- moment the order is finalized as 'completed' — see
+  -- sync_order_finalization() in SECTION 11 — so a later change to
+  -- platform_fee_rate() never retroactively rewrites what an already-settled
+  -- order actually owed.
+  platform_fee_rate numeric(5,2),
+  platform_fee_amount numeric(10,2),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS store_orders_business_id_idx ON public.store_orders(business_id);
 CREATE INDEX IF NOT EXISTS store_orders_customer_id_idx ON public.store_orders(customer_id);
+
+-- Upgrade path for a database that already ran an earlier version of this
+-- file (CREATE TABLE IF NOT EXISTS above is a no-op against it): add the new
+-- columns and widen the status check constraint to match. Both statements
+-- are safe to re-run.
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS awaiting_confirmation_at timestamptz;
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS dispute_reason text;
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS platform_fee_rate numeric(5,2);
+ALTER TABLE public.store_orders ADD COLUMN IF NOT EXISTS platform_fee_amount numeric(10,2);
+ALTER TABLE public.store_orders DROP CONSTRAINT IF EXISTS store_orders_status_check;
+ALTER TABLE public.store_orders ADD CONSTRAINT store_orders_status_check
+  CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'awaiting_confirmation', 'completed', 'disputed', 'cancelled'));
 
 DROP TRIGGER IF EXISTS trg_store_orders_updated_at ON public.store_orders;
 CREATE TRIGGER trg_store_orders_updated_at
@@ -1147,10 +1176,20 @@ CREATE POLICY "store_orders_select_participant" ON public.store_orders FOR SELEC
     OR public.current_user_role() = 'super_admin'
   );
 
+-- A business owner may move an order through its own pre-confirmation
+-- states directly, but 'awaiting_confirmation', 'completed', and 'disputed'
+-- are excluded from this policy's WITH CHECK on purpose — those only ever
+-- happen through request_order_completion() / confirm_order_completion() /
+-- dispute_order_completion() / admin_resolve_order() (SECURITY DEFINER, see
+-- SECTION 11), so a business can never unilaterally mark its own order
+-- 'completed' by any path, not just the ones the UI happens to expose.
 DROP POLICY IF EXISTS "store_orders_update_business_owner" ON public.store_orders;
 CREATE POLICY "store_orders_update_business_owner" ON public.store_orders FOR UPDATE
   USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid()))
-  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid()));
+  WITH CHECK (
+    EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = store_orders.business_id AND b.owner_id = auth.uid())
+    AND status IN ('pending', 'paid', 'processing', 'shipped', 'cancelled')
+  );
 -- No direct INSERT policy: orders are only created via place_order() (SECURITY DEFINER),
 -- which keeps stock decrements and multi-vendor order splitting atomic.
 
@@ -1544,31 +1583,11 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.set_affiliate_payout_status(uuid, text) TO authenticated;
 
--- A completed order makes its referral commission payable; a cancelled one
--- voids it. Fires regardless of how the order's status changed (the app
--- updates store_orders.status directly under its owner-scoped RLS policy,
--- not through an RPC), same trigger-driven style as
--- restore_stock_on_sale_item_delete() above.
-CREATE OR REPLACE FUNCTION public.sync_affiliate_commission_on_order_status()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  IF NEW.status = 'completed' AND OLD.status IS DISTINCT FROM 'completed' THEN
-    UPDATE public.affiliate_commissions SET status = 'approved' WHERE order_id = NEW.id AND status = 'pending';
-  ELSIF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
-    UPDATE public.affiliate_commissions SET status = 'void' WHERE order_id = NEW.id AND status = 'pending';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
+-- Superseded by sync_order_finalization() in SECTION 11 below, which covers
+-- the same two cases plus the platform-fee snapshot — dropped here so a
+-- re-run of this file doesn't leave both triggers firing on the same table.
 DROP TRIGGER IF EXISTS trg_sync_affiliate_commission_on_order_status ON public.store_orders;
-CREATE TRIGGER trg_sync_affiliate_commission_on_order_status
-  AFTER UPDATE OF status ON public.store_orders
-  FOR EACH ROW EXECUTE FUNCTION public.sync_affiliate_commission_on_order_status();
+DROP FUNCTION IF EXISTS public.sync_affiliate_commission_on_order_status();
 
 -- Extend place_order()'s cart items with a per-line `ref_code`. Attribution
 -- is per item, not per order: a commission only covers the items that
@@ -1813,3 +1832,260 @@ CREATE POLICY "affiliate_payouts_select_own_or_admin" ON public.affiliate_payout
   );
 -- No write policy: written only via request_affiliate_payout() /
 -- set_affiliate_payout_status() (SECURITY DEFINER).
+
+-- =============================================================================
+-- SECTION 11 — ORDER COMPLETION CONFIRMATION FLOW
+-- Neither side of an online order gets to unilaterally decide it's "done":
+--   paid/processing/shipped
+--     --(business: request_order_completion)--> awaiting_confirmation
+--       --(customer: confirm_order_completion)--> completed
+--       --(customer: dispute_order_completion)--> disputed --(super_admin: admin_resolve_order)--> completed | cancelled
+--       --(nobody responds for order_confirmation_window(); auto_confirm_stale_orders())--> completed
+-- `completed` is the one moment that settles all three parties at once: the
+-- referring affiliate's commission (already sitting `pending` since
+-- place_order() — see SECTION 10 — never deferred until now) flips to
+-- `approved` and is payable, and the platform's own cut is snapshotted onto
+-- the order. A business's own store_orders UPDATE policy above cannot reach
+-- 'completed' by any path — only these SECURITY DEFINER functions can.
+-- =============================================================================
+
+-- How long an 'awaiting_confirmation' order waits for the customer before
+-- auto_confirm_stale_orders() finalizes it on its own. A single function
+-- (not a hardcoded literal in three places) so the window is one edit to change.
+CREATE OR REPLACE FUNCTION public.order_confirmation_window()
+RETURNS interval
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT interval '4 days';
+$$;
+
+-- The marketplace's own cut of a completed order's total. Same reasoning as
+-- order_confirmation_window() above — one place to change the rate later.
+-- There is deliberately no payout/withdrawal machinery built on top of this
+-- yet (this app has no payment gateway or business payout flow at all): this
+-- only snapshots what the platform is owed for future settlement/reporting.
+CREATE OR REPLACE FUNCTION public.platform_fee_rate()
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT 5.00::numeric;
+$$;
+
+-- Fires on every store_orders status change, BEFORE the row is written, so
+-- it can snapshot NEW.platform_fee_rate/platform_fee_amount onto the same
+-- row instead of issuing a second UPDATE. One finalization event settles the
+-- affiliate commission and the platform fee together, regardless of which of
+-- the four paths above (confirm / timeout / admin force-complete / admin
+-- force-refund) produced it.
+CREATE OR REPLACE FUNCTION public.sync_order_finalization()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.status = 'completed' AND OLD.status IS DISTINCT FROM 'completed' THEN
+    NEW.platform_fee_rate := public.platform_fee_rate();
+    NEW.platform_fee_amount := round(NEW.total * NEW.platform_fee_rate / 100, 2);
+    UPDATE public.affiliate_commissions SET status = 'approved' WHERE order_id = NEW.id AND status = 'pending';
+  ELSIF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+    UPDATE public.affiliate_commissions SET status = 'void' WHERE order_id = NEW.id AND status = 'pending';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_order_finalization ON public.store_orders;
+CREATE TRIGGER trg_sync_order_finalization
+  BEFORE UPDATE OF status ON public.store_orders
+  FOR EACH ROW EXECUTE FUNCTION public.sync_order_finalization();
+
+-- The business claims an order is done. Never finalizes anything by itself —
+-- it only opens the customer's confirmation window. Only reachable from the
+-- states where "done" is a meaningful claim to make.
+CREATE OR REPLACE FUNCTION public.request_order_completion(p_order_id uuid)
+RETURNS public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_order public.store_orders;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT o.* INTO v_order
+  FROM public.store_orders o
+  JOIN public.businesses b ON b.id = o.business_id
+  WHERE o.id = p_order_id AND b.owner_id = v_uid
+  FOR UPDATE OF o;
+
+  IF v_order.id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  IF v_order.status NOT IN ('paid', 'processing', 'shipped') THEN
+    RAISE EXCEPTION 'Order cannot be marked done from status %', v_order.status;
+  END IF;
+
+  UPDATE public.store_orders
+  SET status = 'awaiting_confirmation', awaiting_confirmation_at = now()
+  WHERE id = p_order_id
+  RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.request_order_completion(uuid) TO authenticated;
+
+-- The customer accepts the business's completion claim. This is the normal,
+-- happy-path way an order reaches 'completed'.
+CREATE OR REPLACE FUNCTION public.confirm_order_completion(p_order_id uuid)
+RETURNS public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_order public.store_orders;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT * INTO v_order FROM public.store_orders WHERE id = p_order_id AND customer_id = v_uid FOR UPDATE;
+
+  IF v_order.id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  IF v_order.status <> 'awaiting_confirmation' THEN
+    RAISE EXCEPTION 'Order is not awaiting confirmation';
+  END IF;
+
+  UPDATE public.store_orders SET status = 'completed' WHERE id = p_order_id RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.confirm_order_completion(uuid) TO authenticated;
+
+-- The customer rejects the business's completion claim. Routed to
+-- super_admin (admin_resolve_order() below) rather than back to the
+-- business — the whole point of this flow is that the business doesn't get
+-- another unilateral say once it's disputed.
+CREATE OR REPLACE FUNCTION public.dispute_order_completion(p_order_id uuid, p_reason text)
+RETURNS public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_order public.store_orders;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_reason IS NULL OR length(trim(p_reason)) = 0 THEN
+    RAISE EXCEPTION 'Please describe the problem';
+  END IF;
+
+  SELECT * INTO v_order FROM public.store_orders WHERE id = p_order_id AND customer_id = v_uid FOR UPDATE;
+
+  IF v_order.id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  IF v_order.status <> 'awaiting_confirmation' THEN
+    RAISE EXCEPTION 'Order is not awaiting confirmation';
+  END IF;
+
+  UPDATE public.store_orders
+  SET status = 'disputed', dispute_reason = trim(p_reason)
+  WHERE id = p_order_id
+  RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.dispute_order_completion(uuid, text) TO authenticated;
+
+-- super_admin's backstop: force-complete ('completed') or force-refund
+-- ('cancelled') any order, independent of both parties. This is both how a
+-- 'disputed' order actually gets resolved, and the answer to a business that
+-- simply never requests completion at all — admin isn't stuck waiting on
+-- either side's cooperation.
+CREATE OR REPLACE FUNCTION public.admin_resolve_order(p_order_id uuid, p_resolution text)
+RETURNS public.store_orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_order public.store_orders;
+BEGIN
+  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only super admins can resolve orders';
+  END IF;
+
+  IF p_resolution NOT IN ('completed', 'cancelled') THEN
+    RAISE EXCEPTION 'Invalid resolution: %', p_resolution;
+  END IF;
+
+  SELECT * INTO v_order FROM public.store_orders WHERE id = p_order_id FOR UPDATE;
+
+  IF v_order.id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  IF v_order.status IN ('completed', 'cancelled') THEN
+    RAISE EXCEPTION 'Order is already finalized';
+  END IF;
+
+  UPDATE public.store_orders SET status = p_resolution WHERE id = p_order_id RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_resolve_order(uuid, text) TO authenticated;
+
+-- Closes the opposite exploit from a business that never requests
+-- completion: a customer who just ghosts an 'awaiting_confirmation' order
+-- forever to avoid ever confirming it. Safe to call from any authenticated
+-- session (it only ever touches rows objectively past their own deadline) —
+-- called opportunistically from every order-list page load (customer, business,
+-- and admin) rather than depending on a cron/scheduled-function setup this
+-- project doesn't otherwise have.
+CREATE OR REPLACE FUNCTION public.auto_confirm_stale_orders()
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_count integer;
+BEGIN
+  UPDATE public.store_orders
+  SET status = 'completed'
+  WHERE status = 'awaiting_confirmation'
+    AND awaiting_confirmation_at IS NOT NULL
+    AND awaiting_confirmation_at < now() - public.order_confirmation_window();
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.auto_confirm_stale_orders() TO authenticated;

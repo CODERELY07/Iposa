@@ -29,11 +29,13 @@ const ORDER_STYLES: Record<OrderStatus, string> = {
   paid: IN_PROGRESS,
   processing: IN_PROGRESS,
   shipped: SHIPPED,
+  awaiting_confirmation: WAITING,
   completed: GOOD,
+  disputed: BAD,
   cancelled: BAD,
 }
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  return <StatusPill label={status} className={ORDER_STYLES[status]} />
+  return <StatusPill label={status.replace(/_/g, ' ')} className={ORDER_STYLES[status]} />
 }
 
 const APPLICATION_STYLES: Record<BusinessStatus | AffiliateStatus, string> = {

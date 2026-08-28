@@ -2,10 +2,14 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Card } from '@/components/ui/card'
 import { OrderStatusBadge } from '@/components/marketplace/StatusBadge'
-import { PackageX } from 'lucide-react'
+import OrderConfirmationActions from '@/components/marketplace/OrderConfirmationActions'
+import { Clock3, ShieldAlert, PackageX } from 'lucide-react'
 import type { OrderStatus, StoreOrder, StoreOrderItem } from '@/lib/types/marketplace'
 
 export const revalidate = 0
+
+// Mirrors order_confirmation_window() in database_schema.sql — display-only.
+const CONFIRMATION_WINDOW_DAYS = 4
 
 type OrderWithItems = StoreOrder & {
   businesses: { name: string; slug: string } | null
@@ -21,6 +25,11 @@ export default async function MyOrdersPage() {
   if (!user) {
     redirect('/login')
   }
+
+  // Opportunistic sweep: finalizes any 'awaiting_confirmation' order the
+  // customer never responded to within the window — see
+  // auto_confirm_stale_orders(). Harmless no-op when nothing is overdue.
+  await supabase.rpc('auto_confirm_stale_orders')
 
   const { data: orders, error } = await supabase
     .from('store_orders')
@@ -48,7 +57,12 @@ export default async function MyOrdersPage() {
       )}
 
       <div className="space-y-4">
-        {((orders ?? []) as OrderWithItems[]).map((order) => (
+        {((orders ?? []) as OrderWithItems[]).map((order) => {
+          const deadline = order.awaiting_confirmation_at
+            ? new Date(new Date(order.awaiting_confirmation_at).getTime() + CONFIRMATION_WINDOW_DAYS * 86400000)
+            : null
+
+          return (
           <Card key={order.id} className="overflow-hidden py-0">
             <div className="flex items-center justify-between border-b bg-muted/50 px-4 py-3">
               <div>
@@ -59,6 +73,27 @@ export default async function MyOrdersPage() {
               </div>
               <OrderStatusBadge status={order.status as OrderStatus} />
             </div>
+
+            {order.status === 'awaiting_confirmation' && (
+              <div className="space-y-2.5 border-b bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950">
+                <p className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
+                  <Clock3 className="size-3.5 shrink-0 translate-y-0.5" />
+                  <span>
+                    {order.businesses?.name ?? 'The shop'} says this is done.
+                    {deadline && ` If you don't respond by ${deadline.toLocaleDateString()}, it'll auto-confirm.`}
+                  </span>
+                </p>
+                <OrderConfirmationActions orderId={order.id} />
+              </div>
+            )}
+
+            {order.status === 'disputed' && (
+              <div className="flex items-start gap-2 border-b bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
+                <ShieldAlert className="size-3.5 shrink-0 translate-y-0.5" />
+                <span>Your report is being reviewed by MElocalmarketplace support. We&apos;ll follow up soon.</span>
+              </div>
+            )}
+
             <div className="divide-y">
               {(order.store_order_items ?? []).map((item) => (
                 <div key={item.id} className="flex items-center justify-between px-4 py-2 text-sm">
@@ -71,7 +106,8 @@ export default async function MyOrdersPage() {
               Total: <span className="font-mono">₱{Number(order.total).toFixed(2)}</span>
             </div>
           </Card>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

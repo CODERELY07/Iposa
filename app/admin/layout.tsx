@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { requireSuperAdmin } from '@/lib/supabase/server'
 import SignOutButton from '@/components/auth/SignOutButton'
 import { Badge } from '@/components/ui/badge'
-import { ShieldCheck, Store, Link2, Landmark } from 'lucide-react'
+import { ShieldCheck, Store, Link2, Landmark, Receipt } from 'lucide-react'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireSuperAdmin()
@@ -32,6 +32,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             </Link>
             <Link href="/admin/payouts" className="flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground">
               <Landmark className="size-3.5 text-amber-600 dark:text-amber-400" /> Payouts
+            </Link>
+            <Link href="/admin/orders" className="flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground">
+              <Receipt className="size-3.5 text-rose-600 dark:text-rose-400" /> Orders
             </Link>
             <Link href="/" className="whitespace-nowrap transition-colors hover:text-foreground">Marketplace</Link>
             <SignOutButton className="whitespace-nowrap text-xs font-semibold text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50" />

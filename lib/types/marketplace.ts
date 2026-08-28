@@ -90,7 +90,20 @@ export type MarketplaceProduct = {
   created_at: string
 }
 
-export type OrderStatus = 'pending' | 'paid' | 'processing' | 'shipped' | 'completed' | 'cancelled'
+// 'awaiting_confirmation': the business claims the order is done; this alone
+// never finalizes anything — it just opens a confirmation window for the
+// customer. 'disputed': the customer rejected that claim, routed to
+// super_admin. See request_order_completion() and friends in
+// database_schema.sql SECTION 11 for the full state machine.
+export type OrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'processing'
+  | 'shipped'
+  | 'awaiting_confirmation'
+  | 'completed'
+  | 'disputed'
+  | 'cancelled'
 
 export type StoreOrder = {
   id: string
@@ -103,6 +116,10 @@ export type StoreOrder = {
   shipping_phone: string | null
   shipping_address: string | null
   notes: string | null
+  awaiting_confirmation_at: string | null
+  dispute_reason: string | null
+  platform_fee_rate: number | null
+  platform_fee_amount: number | null
   created_at: string
   updated_at: string
 }

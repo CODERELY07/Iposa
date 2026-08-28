@@ -102,11 +102,15 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
             </SheetContent>
           </Sheet>
 
-          <Link href="/" className="group flex min-w-0 items-center gap-2">
+          {/* Below `lg` the full nav is already tucked away behind the
+              hamburger (see the Sheet above), which shows the full name —
+              so the bar itself only needs the mark to stay recognizable,
+              freeing up the room Cart/Sign in need on a narrow phone. */}
+          <Link href="/" aria-label="MElocalmarketplace" className="group flex min-w-0 items-center gap-2">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-white shadow-glow-primary transition-transform group-hover:scale-105">
               <PackageSearch className="size-4.5" />
             </span>
-            <span className="truncate font-serif text-[21px] leading-none tracking-tight text-foreground lg:text-[23px] xl:text-[25px]">
+            <span className="hidden truncate font-serif text-[23px] leading-none tracking-tight text-foreground lg:inline xl:text-[25px]">
               MElocalmarketplace
             </span>
           </Link>
