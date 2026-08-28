@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS public.operating_expenses (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   title text NOT NULL,
+  description text,
   amount numeric NOT NULL,
   billing_period date NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -346,6 +347,9 @@ CREATE TABLE IF NOT EXISTS public.operating_expenses (
 -- Additive, in case an earlier run of this script created
 -- `operating_expenses` before it was business-scoped.
 ALTER TABLE public.operating_expenses ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
+-- Additive, for installs from before the Expenses page (which lets an owner
+-- attach a free-text note to a bill, e.g. "Meralco - March, includes late fee").
+ALTER TABLE public.operating_expenses ADD COLUMN IF NOT EXISTS description text;
 
 CREATE INDEX IF NOT EXISTS operating_expenses_business_id_idx ON public.operating_expenses(business_id);
 
@@ -1385,13 +1389,18 @@ CREATE INDEX IF NOT EXISTS affiliate_payouts_affiliate_id_idx ON public.affiliat
 -- (order cancelled) -> paid (once its payout is marked paid).
 -- `referred_subtotal` is the subtotal of just the items that carried this
 -- affiliate's code when they were added to the cart, not the whole order —
--- see place_order() below.
+-- see place_order() below. `commission_rate` is applied against
+-- `referred_profit` (that same referred slice's revenue minus its item
+-- cost — recipe cost or cost_price, same basis as Analytics), not against
+-- `referred_subtotal` — an affiliate earns a cut of what the business
+-- actually made on the sale, not a cut of gross revenue.
 CREATE TABLE IF NOT EXISTS public.affiliate_commissions (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
   order_id uuid NOT NULL REFERENCES public.store_orders(id) ON DELETE CASCADE,
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   referred_subtotal numeric(10,2) NOT NULL,
+  referred_profit numeric(10,2) NOT NULL DEFAULT 0,
   commission_rate numeric(5,2) NOT NULL,
   commission_amount numeric(10,2) NOT NULL,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'void', 'paid')),
@@ -1416,6 +1425,12 @@ BEGIN
     ALTER TABLE public.affiliate_commissions RENAME COLUMN order_subtotal TO referred_subtotal;
   END IF;
 END $$;
+-- Additive, for installs from before commissions were computed on profit
+-- instead of revenue — see place_order() below. Existing rows keep their
+-- old (revenue-basis) commission_amount as-is; only new orders use the
+-- profit basis, so this backfills the new column to 0 rather than trying
+-- to reconstruct a profit figure for historical rows.
+ALTER TABLE public.affiliate_commissions ADD COLUMN IF NOT EXISTS referred_profit numeric(10,2) NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS affiliate_commissions_affiliate_id_idx ON public.affiliate_commissions(affiliate_id);
 CREATE INDEX IF NOT EXISTS affiliate_commissions_order_id_idx ON public.affiliate_commissions(order_id);
@@ -2246,6 +2261,7 @@ DECLARE
   v_ref_commission_rate numeric(5,2);
   v_ref_business_owner uuid;
   v_ref_item_subtotal numeric(10,2);
+  v_ref_item_profit numeric(10,2);
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'Not authenticated';
@@ -2405,13 +2421,30 @@ BEGIN
 
       CONTINUE WHEN v_ref_commission_rate IS NULL OR v_ref_affiliate_user_id IS NOT DISTINCT FROM v_ref_business_owner;
 
-      SELECT COALESCE(SUM(c.quantity * p.price), 0) INTO v_ref_item_subtotal
+      -- Commission is paid out of what the business actually made on the
+      -- referred items, not their sticker price — the same per-unit cost
+      -- basis as process_sale()/Analytics (recipe cost, falling back to
+      -- cost_price for a non-recipe product), summed only across the items
+      -- that carried this affiliate's code.
+      SELECT
+        COALESCE(SUM(c.quantity * p.price), 0),
+        COALESCE(SUM(c.quantity * (p.price - COALESCE(
+          (SELECT SUM(r.quantity_used * i.cost_per_unit)
+             FROM public.recipes r JOIN public.ingredients i ON i.id = r.ingredient_id
+             WHERE r.product_id = p.id),
+          p.cost_price
+        ))), 0)
+      INTO v_ref_item_subtotal, v_ref_item_profit
         FROM _cart_items c
         JOIN public.store_products p ON p.id = c.product_id
         WHERE p.business_id = v_business_id AND c.ref_code = v_ref_code;
 
-      INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, commission_rate, commission_amount, status)
-      VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_commission_rate, round(v_ref_item_subtotal * v_ref_commission_rate / 100, 2), 'pending')
+      -- GREATEST(..., 0): an item sold below its own cost has negative
+      -- profit — floor the commission basis at 0 rather than letting a
+      -- money-losing sale generate a negative commission (or, worse, net
+      -- against a different affiliate's positive one at payout time).
+      INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, referred_profit, commission_rate, commission_amount, status)
+      VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_item_profit, v_ref_commission_rate, round(GREATEST(v_ref_item_profit, 0) * v_ref_commission_rate / 100, 2), 'pending')
       ON CONFLICT (affiliate_id, order_id) DO NOTHING;
     END LOOP;
 

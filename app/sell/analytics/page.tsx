@@ -25,7 +25,7 @@ export default async function SellAnalyticsPage() {
       .from('sale_items')
       .select('quantity, selling_price, product_id, custom_name, computed_cogs, sales!inner(created_at, business_id), store_products(name, cost_price, category_id)')
       .eq('sales.business_id', business.id),
-    supabase.from('operating_expenses').select('amount').eq('business_id', business.id).gte('billing_period', startOfMonth),
+    supabase.from('operating_expenses').select('title, description, amount, billing_period').eq('business_id', business.id).gte('billing_period', startOfMonth),
     supabase.from('ingredients').select('id, name, current_stock, min_stock_alert, cost_per_unit, unit_type').eq('business_id', business.id),
     supabase.from('store_products').select('id, name, category_id, categories(name), recipes(ingredient_id, quantity_used)').eq('business_id', business.id)
   ])
@@ -165,6 +165,17 @@ export default async function SellAnalyticsPage() {
 
   const categoryShares = Object.entries(categoryRevenueMap).map(([name, value]) => ({ name, value }))
 
+  // What's actually being subtracted from this month's net profit — shown
+  // on the Analytics page itself so an owner doesn't have to visit
+  // /sell/expenses just to see why net profit is lower than gross profit.
+  const expensesBreakdown = expensesRaw
+    .map(exp => ({
+      title: exp.title,
+      description: exp.description,
+      amount: Number(exp.amount || 0)
+    }))
+    .sort((a, b) => b.amount - a.amount)
+
   const lowStockIngredients = ingredientsRaw
     .filter(ing => Number(ing.current_stock) <= Number(ing.min_stock_alert))
     .map(ing => ({
@@ -180,6 +191,7 @@ export default async function SellAnalyticsPage() {
       salesRaw={salesRaw}
       topProducts={topProducts}
       categoryShares={categoryShares}
+      expensesBreakdown={expensesBreakdown}
       lowStockIngredients={lowStockIngredients}
       ingredientsCostList={ingredientsRaw.map(i => ({ name: i.name, cost: Number(i.cost_per_unit || 0), unit_type: i.unit_type }))}
       kpis={{

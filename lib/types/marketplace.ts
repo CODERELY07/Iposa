@@ -74,6 +74,19 @@ export type RecipeItem = {
   quantity_used: number
 }
 
+// A fixed operating bill (rent, utilities, staff, subscriptions) logged on
+// the Expenses page. Anything with billing_period within the current
+// calendar month is deducted automatically from Analytics' net profit.
+export type OperatingExpense = {
+  id: number
+  business_id: string
+  title: string
+  description: string | null
+  amount: number
+  billing_period: string
+  created_at: string
+}
+
 // Row shape returned by the public.marketplace_products view — pre-joined
 // with the owning (approved) business and category for the storefront feed.
 export type MarketplaceProduct = {
@@ -192,6 +205,9 @@ export type AffiliateCommission = {
   // Subtotal of just the items that were added/bought through this
   // affiliate's link — not necessarily the whole order's total.
   referred_subtotal: number
+  // That same referred slice's profit (revenue minus item cost) — what
+  // commission_rate is actually applied against, not referred_subtotal.
+  referred_profit: number
   commission_rate: number
   commission_amount: number
   status: AffiliateCommissionStatus

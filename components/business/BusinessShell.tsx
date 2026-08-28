@@ -18,6 +18,7 @@ import {
   Receipt,
   ScrollText,
   LineChart,
+  Wallet,
   Settings,
   KeyRound,
   LogOut,
@@ -67,6 +68,7 @@ function getNavSections(business: Business): { section: string; items: NavItem[]
         { href: '/sell/orders', label: 'Online Orders', icon: Receipt, color: 'indigo' },
         { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
         { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
+        { href: '/sell/expenses', label: 'Expenses', icon: Wallet, color: 'amber' },
       ],
     },
   ]

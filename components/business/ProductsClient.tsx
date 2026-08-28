@@ -26,6 +26,10 @@ type Props = {
   categories: StoreCategory[]
   ingredients: Ingredient[]
   businessType: BusinessType
+  // null when the shop hasn't enabled its affiliate program — the Affiliate
+  // Cut column is hidden entirely in that case rather than shown as ₱0,
+  // since there's nothing an affiliate could actually earn on this product.
+  affiliateSettings: { commission_rate: number } | null
   onSaveAction: (payload: {
     id: number | null
     name: string
@@ -55,7 +59,7 @@ const EMPTY_FORM = {
 
 const NO_CATEGORY = '__none__'
 
-export default function ProductsClient({ initialProducts, categories, ingredients, businessType, onSaveAction, onDeleteAction }: Props) {
+export default function ProductsClient({ initialProducts, categories, ingredients, businessType, affiliateSettings, onSaveAction, onDeleteAction }: Props) {
   const meta = getBusinessTypeMeta(businessType)
   const [isPending, startTransition] = useTransition()
   const [modalOpen, setModalOpen] = useState(false)
@@ -258,6 +262,8 @@ export default function ProductsClient({ initialProducts, categories, ingredient
               <TableHead className="p-4 font-mono text-[11px]">SKU</TableHead>
               <TableHead className="p-4 text-right">Cost</TableHead>
               <TableHead className="p-4 text-right">Price</TableHead>
+              <TableHead className="p-4 text-right">Profit</TableHead>
+              {affiliateSettings && <TableHead className="p-4 text-right">Affiliate Cut</TableHead>}
               {meta.tracksStock && <TableHead className="p-4 text-center">Type</TableHead>}
               {meta.tracksStock && <TableHead className="p-4 text-center">Stock</TableHead>}
               <TableHead className="p-4 text-center">Listed</TableHead>
@@ -278,6 +284,15 @@ export default function ProductsClient({ initialProducts, categories, ingredient
 
               const dynamicStock = hasRecipe && p.recipes ? calculateRecipeStock(p.recipes) : p.stock
 
+              // Same "profit" Analytics reports: selling price minus item
+              // cost (recipe cost, or cost_price for a standalone item).
+              const profit = Number(p.price) - totalCostForAnalytics
+              const profitMargin = Number(p.price) > 0 ? (profit / Number(p.price)) * 100 : 0
+              // What an affiliate actually earns per unit — commission_rate
+              // applied to this profit, not to the selling price. Floored at
+              // 0: an item priced at or below cost has no profit to share.
+              const affiliateCut = affiliateSettings ? Math.max(profit, 0) * (affiliateSettings.commission_rate / 100) : 0
+
               return (
                 <TableRow key={p.id}>
                   <TableCell className="whitespace-normal p-4 font-bold text-foreground">{p.name}</TableCell>
@@ -294,6 +309,16 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                     </span>
                   </TableCell>
                   <TableCell className="p-4 text-right font-mono font-bold text-foreground">₱{Number(p.price).toFixed(2)}</TableCell>
+                  <TableCell className="p-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    ₱{profit.toFixed(2)}
+                    <span className="block font-sans text-[9px] font-bold text-muted-foreground">{profitMargin.toFixed(0)}% margin</span>
+                  </TableCell>
+                  {affiliateSettings && (
+                    <TableCell className="p-4 text-right font-mono text-amber-600 dark:text-amber-400">
+                      -₱{affiliateCut.toFixed(2)}
+                      <span className="block font-sans text-[9px] font-bold text-muted-foreground">{affiliateSettings.commission_rate}% of profit</span>
+                    </TableCell>
+                  )}
                   {meta.tracksStock && (
                     <TableCell className="p-4 text-center">
                       <Badge variant={hasRecipe ? 'default' : 'outline'} className="font-mono uppercase tracking-wider">
@@ -326,7 +351,10 @@ export default function ProductsClient({ initialProducts, categories, ingredient
             })}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={meta.tracksStock ? 9 : 7} className="p-10 text-center text-muted-foreground">
+                <TableCell
+                  colSpan={8 + (meta.tracksStock ? 2 : 0) + (affiliateSettings ? 1 : 0)}
+                  className="p-10 text-center text-muted-foreground"
+                >
                   <div className="flex flex-col items-center gap-2">
                     <span className="flex size-12 items-center justify-center rounded-2xl bg-gradient-brand-soft">
                       <PackageSearch className="size-5 text-primary" />

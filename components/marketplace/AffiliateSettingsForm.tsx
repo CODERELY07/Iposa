@@ -57,7 +57,10 @@ export default function AffiliateSettingsForm({ settings }: { settings: Business
           disabled={!enabled}
           className="w-32"
         />
-        <p className="text-[11px] text-muted-foreground">Paid to an affiliate out of your revenue for each order they refer.</p>
+        <p className="text-[11px] text-muted-foreground">
+          Paid to an affiliate out of your profit (selling price minus item cost), not your revenue — e.g. a ₱29
+          item with ₱15 profit and a 10% rate pays the affiliate ₱1.50, not ₱2.90.
+        </p>
       </div>
 
       <Button type="submit" disabled={isPending}>

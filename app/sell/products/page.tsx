@@ -10,7 +10,7 @@ export default async function SellProductsPage() {
   const business = await requireApprovedBusiness()
   const supabase = await createClient()
 
-  const [{ data: products, error }, { data: categories }, { data: ingredients }] = await Promise.all([
+  const [{ data: products, error }, { data: categories }, { data: ingredients }, { data: affiliateSettings }] = await Promise.all([
     supabase
       .from('store_products')
       .select('*, categories(name), recipes(ingredient_id, quantity_used)')
@@ -18,6 +18,7 @@ export default async function SellProductsPage() {
       .order('created_at', { ascending: false }),
     supabase.from('categories').select('id, name, slug, created_at').order('name'),
     supabase.from('ingredients').select('*').eq('business_id', business.id).order('name'),
+    supabase.from('business_affiliate_settings').select('enabled, commission_rate').eq('business_id', business.id).maybeSingle(),
   ])
 
   if (error) {
@@ -35,6 +36,7 @@ export default async function SellProductsPage() {
       categories={categories ?? []}
       ingredients={ingredients ?? []}
       businessType={business.business_type}
+      affiliateSettings={affiliateSettings?.enabled ? { commission_rate: Number(affiliateSettings.commission_rate) } : null}
       onSaveAction={saveProductAction}
       onDeleteAction={deleteProductAction}
     />

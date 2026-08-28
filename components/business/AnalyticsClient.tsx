@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import Link from 'next/link'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -31,6 +32,7 @@ type Props = {
   salesRaw: { total: number; created_at: string }[]
   topProducts: { name: string; qty: number; revenue: number; profit: number }[]
   categoryShares: { name: string; value: number }[]
+  expensesBreakdown: { title: string; description: string | null; amount: number }[]
   lowStockIngredients: { name: string; current_stock: number; min_stock_alert: number; unit_type: string }[]
   ingredientsCostList: { name: string; cost: number; unit_type: string }[]
   kpis: {
@@ -45,7 +47,7 @@ type Props = {
   }
 }
 
-export default function AnalyticsClient({ businessType, salesRaw, topProducts, categoryShares, lowStockIngredients, ingredientsCostList, kpis }: Props) {
+export default function AnalyticsClient({ businessType, salesRaw, topProducts, categoryShares, expensesBreakdown, lowStockIngredients, ingredientsCostList, kpis }: Props) {
   const meta = getBusinessTypeMeta(businessType)
 
   // Computes the past 7 days of sales for trend monitoring
@@ -151,6 +153,34 @@ export default function AnalyticsClient({ businessType, salesRaw, topProducts, c
           <span className="text-[10px] text-muted-foreground">Target parameter {'>'} 20%</span>
         </Card>
       </div>
+
+      <Card className="p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-amber-600 dark:text-amber-400">
+            Expenses Deducted This Month ({expensesBreakdown.length})
+          </h3>
+          <Link href="/sell/expenses" className="text-xs font-medium text-primary hover:underline">
+            Manage expenses →
+          </Link>
+        </div>
+        {expensesBreakdown.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No operating expenses logged this month — net profit currently equals gross profit.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {expensesBreakdown.map((exp, idx) => (
+              <div key={idx} className="flex items-start justify-between gap-3 rounded-lg border border-amber-100 bg-amber-50/50 p-2.5 text-xs dark:border-amber-900 dark:bg-amber-950/40">
+                <div className="min-w-0">
+                  <span className="block truncate font-bold text-foreground">{exp.title}</span>
+                  {exp.description && <span className="block truncate text-[10px] text-muted-foreground">{exp.description}</span>}
+                </div>
+                <span className="shrink-0 font-mono font-bold text-amber-600 dark:text-amber-400">
+                  -₱{exp.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-2">
