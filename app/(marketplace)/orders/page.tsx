@@ -4,7 +4,8 @@ import { Card } from '@/components/ui/card'
 import { OrderStatusBadge, FulfillmentBadge } from '@/components/marketplace/StatusBadge'
 import OrderConfirmationActions from '@/components/marketplace/OrderConfirmationActions'
 import ReportCancelledOrder from '@/components/marketplace/ReportCancelledOrder'
-import { Clock3, ShieldAlert, PackageX, MapPinned, Ban } from 'lucide-react'
+import ViewOnMapButton from '@/components/marketplace/ViewOnMapButton'
+import { Clock3, ShieldAlert, PackageX, Ban } from 'lucide-react'
 import type { OrderStatus, StoreOrder, StoreOrderItem } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -124,14 +125,13 @@ export default async function MyOrdersPage() {
                   <>
                     <span className="font-medium text-foreground">Pick up from:</span> {order.businesses.address}
                     {order.businesses.location_lat != null && order.businesses.location_lng != null && (
-                      <a
-                        href={`https://www.openstreetmap.org/?mlat=${order.businesses.location_lat}&mlon=${order.businesses.location_lng}#map=17/${order.businesses.location_lat}/${order.businesses.location_lng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-2 inline-flex items-center gap-1 text-primary hover:underline"
-                      >
-                        <MapPinned className="size-3" /> View on map
-                      </a>
+                      <ViewOnMapButton
+                        className="ml-2"
+                        lat={order.businesses.location_lat}
+                        lng={order.businesses.location_lng}
+                        title={`Pick up from ${order.businesses.name}`}
+                        description={order.businesses.address ?? undefined}
+                      />
                     )}
                   </>
                 ) : (
@@ -141,14 +141,14 @@ export default async function MyOrdersPage() {
                 <>
                   {order.shipping_address}
                   {order.shipping_lat != null && order.shipping_lng != null && (
-                    <a
-                      href={`https://www.openstreetmap.org/?mlat=${order.shipping_lat}&mlon=${order.shipping_lng}#map=17/${order.shipping_lat}/${order.shipping_lng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-2 inline-flex items-center gap-1 text-primary hover:underline"
-                    >
-                      <MapPinned className="size-3" /> View pinned location
-                    </a>
+                    <ViewOnMapButton
+                      className="ml-2"
+                      lat={order.shipping_lat}
+                      lng={order.shipping_lng}
+                      title="Delivery location"
+                      description={order.shipping_address ?? undefined}
+                      label="View pinned location"
+                    />
                   )}
                 </>
               )}

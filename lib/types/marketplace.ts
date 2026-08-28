@@ -128,8 +128,9 @@ export type StoreOrder = {
   shipping_phone: string | null
   fulfillment_method: FulfillmentMethod
   shipping_address: string | null
-  // Set only when the customer confirmed a pin on the checkout map — see
-  // MapLocationPicker. Never required; shipping_address alone is enough.
+  // Set from the pin the customer confirmed on the checkout map — see
+  // MapLocationPicker. Required for 'delivery' orders (enforced by
+  // place_order()); always null for 'pickup', which has no shipping address.
   shipping_lat: number | null
   shipping_lng: number | null
   notes: string | null

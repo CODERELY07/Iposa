@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useCart } from '@/lib/marketplace/cart-context'
+import { createClient } from '@/lib/supabase/client'
 import { placeOrderAction } from '@/app/(marketplace)/checkout/actions'
 import type { FulfillmentMethod } from '@/lib/types/marketplace'
 import { Button } from '@/components/ui/button'
@@ -13,10 +14,19 @@ import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import MapLocationPicker from '@/components/marketplace/MapLocationPicker'
+import ViewOnMapButton from '@/components/marketplace/ViewOnMapButton'
 import { AlertCircle, Loader2, MapPinned, Store, Truck, X } from 'lucide-react'
 
+type PickupLocation = {
+  businessId: string
+  businessName: string
+  address: string | null
+  lat: number | null
+  lng: number | null
+}
+
 export default function CheckoutForm({ defaultName }: { defaultName: string }) {
-  const { items, totalPrice, clear } = useCart()
+  const { items, totalPrice, clear, groupedByBusiness } = useCart()
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -33,6 +43,51 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
 
   const isDelivery = form.fulfillmentMethod === 'delivery'
   const needsPin = isDelivery && (form.lat == null || form.lng == null)
+
+  const [pickupLocations, setPickupLocations] = useState<PickupLocation[]>([])
+  const [pickupLoading, setPickupLoading] = useState(false)
+  const businessIdsKey = groupedByBusiness.map(g => g.businessId).join(',')
+
+  // Pulled fresh from `businesses` rather than carried on the cart item —
+  // the cart only ever stored what a product listing needs (id/name/price),
+  // never the seller's pickup pin, so picking "Pickup" here has to fetch it.
+  useEffect(() => {
+    if (isDelivery || !businessIdsKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPickupLocations([])
+      return
+    }
+    let cancelled = false
+    async function load() {
+      setPickupLoading(true)
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('businesses')
+        .select('id, name, address, location_lat, location_lng')
+        .in('id', businessIdsKey.split(','))
+      if (cancelled) return
+      setPickupLocations(
+        groupedByBusiness.map(g => {
+          const biz = data?.find(b => b.id === g.businessId)
+          return {
+            businessId: g.businessId,
+            businessName: g.businessName,
+            address: biz?.address ?? null,
+            lat: biz?.location_lat ?? null,
+            lng: biz?.location_lng ?? null,
+          }
+        })
+      )
+      setPickupLoading(false)
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+    // groupedByBusiness is intentionally not a dep — it's a new array each
+    // render but stable in content whenever businessIdsKey doesn't change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDelivery, businessIdsKey])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -151,12 +206,41 @@ export default function CheckoutForm({ defaultName }: { defaultName: string }) {
           )}
         </div>
       ) : (
-        <Alert>
-          <Store />
-          <AlertDescription>
-            You&apos;ll pick this up directly from the seller. They&apos;ll reach out with the pickup address and timing.
-          </AlertDescription>
-        </Alert>
+        <div className="space-y-2">
+          <Alert>
+            <Store />
+            <AlertDescription>
+              You&apos;ll pick this up directly from the seller. They&apos;ll reach out with the pickup address and timing.
+            </AlertDescription>
+          </Alert>
+
+          {pickupLoading && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" /> Loading pickup location…
+            </p>
+          )}
+
+          {!pickupLoading && pickupLocations.map(loc => (
+            <div key={loc.businessId} className="rounded-lg border p-3 text-xs">
+              <p className="font-medium text-foreground">{loc.businessName}</p>
+              {loc.address && <p className="mt-0.5 text-muted-foreground">{loc.address}</p>}
+              {loc.lat != null && loc.lng != null ? (
+                <ViewOnMapButton
+                  className="mt-1.5"
+                  lat={loc.lat}
+                  lng={loc.lng}
+                  title={`Pick up from ${loc.businessName}`}
+                  description={loc.address ?? undefined}
+                  label="View shop location on map"
+                />
+              ) : (
+                <p className="mt-1.5 text-muted-foreground">
+                  No pickup location set yet — the seller will contact you with pickup details.
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       <div className="space-y-1.5">
