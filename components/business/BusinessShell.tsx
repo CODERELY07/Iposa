@@ -28,6 +28,7 @@ import {
   ArrowUpRight,
   PanelLeftClose,
   PanelLeftOpen,
+  Sparkles,
 } from 'lucide-react'
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; color: NavColor }
@@ -52,6 +53,11 @@ function getNavSections(business: Business): { section: string; items: NavItem[]
       section: 'Catalog',
       items: [
         { href: '/sell/products', label: meta.catalogLabel, icon: Package, color: 'violet' },
+        // Retail items mirror in from Products automatically (see
+        // trg_sync_offering_for_product in database_schema.sql) — this page
+        // is really for anything that isn't a cart checkout: repairs,
+        // printing, loan applications, bookings, whatever comes next.
+        { href: '/sell/offerings', label: 'Offerings', icon: Sparkles, color: 'sky' },
         { href: '/sell/categories', label: 'Categories', icon: Tag, color: 'amber' },
         ...(meta.showMaterialsNav
           ? [{
@@ -66,7 +72,7 @@ function getNavSections(business: Business): { section: string; items: NavItem[]
     {
       section: 'Sales',
       items: [
-        { href: '/sell/orders', label: 'Online Orders', icon: Receipt, color: 'indigo' },
+        { href: '/sell/orders-and-requests', label: 'Orders & Requests', icon: Receipt, color: 'indigo' },
         { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
         { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
         { href: '/sell/expenses', label: 'Expenses', icon: Wallet, color: 'amber' },

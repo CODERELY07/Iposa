@@ -1,11 +1,12 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { Card } from '@/components/ui/card'
 import { OrderStatusBadge, FulfillmentBadge } from '@/components/marketplace/StatusBadge'
 import OrderConfirmationActions from '@/components/marketplace/OrderConfirmationActions'
 import ReportCancelledOrder from '@/components/marketplace/ReportCancelledOrder'
 import ViewOnMapButton from '@/components/marketplace/ViewOnMapButton'
-import { Clock3, ShieldAlert, PackageX, Ban } from 'lucide-react'
+import { Clock3, ShieldAlert, PackageX, Ban, Sparkles } from 'lucide-react'
 import type { OrderStatus, StoreOrder, StoreOrderItem } from '@/lib/types/marketplace'
 
 export const revalidate = 0
@@ -24,6 +25,10 @@ type OrderWithItems = StoreOrder & {
   store_order_items: StoreOrderItem[]
 }
 
+// Cart checkouts only — service requests live on their own /services page
+// (a customer requesting a repair or a loan isn't "an order" in the
+// cart/POS sense, and mixing the two into one list is exactly what made the
+// service side easy to overlook here). See /services/page.tsx.
 export default async function MyOrdersPage() {
   const supabase = await createClient()
   const {
@@ -47,7 +52,12 @@ export default async function MyOrdersPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      <h1 className="mb-5 font-serif text-2xl font-normal tracking-tight text-foreground">My orders</h1>
+      <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">My orders</h1>
+        <Link href="/services" className="flex items-center gap-1.5 text-sm text-primary hover:underline">
+          <Sparkles className="size-3.5" /> Looking for a service you requested?
+        </Link>
+      </div>
 
       {error && (
         <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">

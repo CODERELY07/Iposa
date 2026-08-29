@@ -47,6 +47,7 @@ export default function MarketplaceFooter({ userEmail }: Props) {
               <>
                 <span className="max-w-full truncate text-muted-foreground" title={userEmail}>{userEmail}</span>
                 <Link href="/orders" className="text-muted-foreground transition-colors hover:text-foreground">My orders</Link>
+                <Link href="/services" className="text-muted-foreground transition-colors hover:text-foreground">My services</Link>
                 <SignOutButton className="w-fit text-left text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50" />
               </>
             ) : (

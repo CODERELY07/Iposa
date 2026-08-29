@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ProductCard from '@/components/marketplace/ProductCard'
-import { Store, PackageX, MapPinned } from 'lucide-react'
-import type { MarketplaceProduct } from '@/lib/types/marketplace'
+import OfferingCard from '@/components/marketplace/OfferingCard'
+import { Store, PackageX, MapPinned, Sparkles } from 'lucide-react'
+import type { MarketplaceProduct, MarketplaceOffering } from '@/lib/types/marketplace'
 
 export const revalidate = 0
 
@@ -21,11 +22,21 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
     notFound()
   }
 
-  const { data: products, error } = await supabase
-    .from('marketplace_products')
-    .select('*')
-    .eq('business_slug', slug)
-    .order('created_at', { ascending: false })
+  const [{ data: products, error }, { data: offerings }] = await Promise.all([
+    supabase
+      .from('marketplace_products')
+      .select('*')
+      .eq('business_slug', slug)
+      .order('created_at', { ascending: false }),
+    // Only the non-POS half — every retail item above already covers
+    // requires_pos = true via marketplace_products, unchanged.
+    supabase
+      .from('marketplace_offerings')
+      .select('*')
+      .eq('business_slug', slug)
+      .eq('requires_pos', false)
+      .order('sort_order', { ascending: true }),
+  ])
 
   return (
     <div>
@@ -71,20 +82,38 @@ export default async function ShopPage({ params }: { params: Promise<{ slug: str
           </div>
         )}
 
-        {!error && (products ?? []).length === 0 && (
+        {!error && (products ?? []).length === 0 && (offerings ?? []).length === 0 && (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card py-16 text-center">
             <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-brand-soft">
               <PackageX className="size-6 text-primary" />
             </span>
-            <p className="text-sm text-muted-foreground">This shop hasn&apos;t listed any products yet.</p>
+            <p className="text-sm text-muted-foreground">This shop hasn&apos;t listed anything yet.</p>
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {(products as MarketplaceProduct[] ?? []).map(p => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {(products ?? []).length > 0 && (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {(products as MarketplaceProduct[] ?? []).map(p => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        )}
+
+        {(offerings ?? []).length > 0 && (
+          <div className={(products ?? []).length > 0 ? 'mt-10' : ''}>
+            <h2 className="mb-3 flex items-center gap-1.5 font-serif text-lg font-normal tracking-tight text-foreground">
+              <Sparkles className="size-4 text-primary" /> Services &amp; requests
+            </h2>
+            <p className="mb-4 text-sm text-muted-foreground">
+              These aren&apos;t bought through a cart — send a request and {business.name} will follow up directly.
+            </p>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {(offerings as MarketplaceOffering[] ?? []).map(o => (
+                <OfferingCard key={o.id} offering={o} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

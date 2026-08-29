@@ -21,7 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Menu, ShoppingCart, Store, ShieldCheck, Link2, PackageSearch, LogIn } from 'lucide-react'
+import { Menu, ShoppingCart, Store, ShieldCheck, Link2, PackageSearch, LogIn, Sparkles } from 'lucide-react'
 import type { UserRole } from '@/lib/supabase/server'
 
 type Props = {
@@ -52,6 +52,11 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
       {userEmail && (
         <Link href="/orders" className={navLinkClass}>
           My Orders
+        </Link>
+      )}
+      {userEmail && (
+        <Link href="/services" className={navLinkClass}>
+          My Services
         </Link>
       )}
       {roleLink && (
@@ -162,6 +167,9 @@ export default function MarketplaceHeader({ userEmail, role }: Props) {
                 )}
                 <DropdownMenuItem render={<Link href="/orders" />}>
                   <PackageSearch /> My Orders
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/services" />}>
+                  <Sparkles /> My Services
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <div className="px-1.5 py-1">

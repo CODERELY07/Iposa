@@ -2735,3 +2735,843 @@ GROUP BY b.id, b.name, b.slug
 HAVING count(*) FILTER (WHERE o.disputed_from_cancellation) > 0;
 
 GRANT SELECT ON public.business_cancellation_reports TO authenticated;
+
+-- =============================================================================
+-- SECTION 14 — HYBRID OFFERINGS & SERVICE REQUESTS
+--
+-- Lets a business sell retail stock through the existing POS/cart pipeline
+-- (store_products, store_orders, sales — none of it touched below) AND, at
+-- the same time, take in arbitrary non-POS work — repairs, printing,
+-- pa-utang applications, bookings, anything an owner invents — through
+-- schema-driven request forms. Nothing here alters an existing table's
+-- shape, trigger, or RPC; every table, view and function below is additive.
+--
+-- The core idea: `offerings` is the one catalog the storefront reads. A row
+-- either points at a real store_products row (requires_pos = true — POS
+-- keeps owning price/stock/checkout exactly as today) or stands alone with
+-- its own price and a JSON-defined input form (requires_pos = false —
+-- answers land in `service_requests`, never in store_orders).
+-- =============================================================================
+
+-- ---- 14.1 capability flags ----
+
+-- One row per (business, capability). module_key is deliberately free text,
+-- not a CHECK-constrained enum — a capability nobody has thought of yet must
+-- be turnable-on without a migration. module_definitions below is optional
+-- display metadata for keys the platform already knows about; it is NOT a
+-- foreign key constraint on module_key, so an unlisted/experimental key is
+-- still legal to enable for one business ahead of being formally catalogued.
+CREATE TABLE IF NOT EXISTS public.business_modules (
+  business_id  uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  module_key   text NOT NULL,
+  enabled      boolean NOT NULL DEFAULT true,
+  config       jsonb NOT NULL DEFAULT '{}',
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (business_id, module_key)
+);
+
+DROP TRIGGER IF EXISTS trg_business_modules_updated_at ON public.business_modules;
+CREATE TRIGGER trg_business_modules_updated_at
+  BEFORE UPDATE ON public.business_modules
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TABLE IF NOT EXISTS public.module_definitions (
+  module_key   text PRIMARY KEY,
+  label        text NOT NULL,
+  description  text,
+  icon         text
+);
+
+INSERT INTO public.module_definitions (module_key, label, description, icon) VALUES
+  ('pos', 'Point of Sale', 'In-person register and cart checkout', 'credit-card'),
+  ('custom_offerings', 'Custom Offerings', 'Non-POS services, bookings and request forms', 'sparkles')
+ON CONFLICT (module_key) DO NOTHING;
+
+-- SECURITY DEFINER (not a plain SQL function) is required here — this is
+-- called from submit_service_request() on behalf of a shopping customer, who
+-- has no SELECT access to another business's business_modules rows under the
+-- RLS policy below. Without SECURITY DEFINER the inner SELECT would always
+-- see zero rows for that caller and this would silently return false for
+-- every business, module or not.
+CREATE OR REPLACE FUNCTION public.business_has_module(p_business_id uuid, p_key text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT enabled FROM public.business_modules WHERE business_id = p_business_id AND module_key = p_key),
+    false
+  );
+$$;
+
+-- Backfill for every business that existed before this section shipped:
+-- `pos` mirrors the same tracksStock logic set_business_type() already uses
+-- (business_type <> 'services'); `custom_offerings` is on for everyone by
+-- default — enabling it costs a retail-only owner nothing until they
+-- actually build a non-POS offering. Both INSERTs are idempotent.
+INSERT INTO public.business_modules (business_id, module_key, enabled)
+SELECT id, 'pos', business_type <> 'services' FROM public.businesses
+ON CONFLICT (business_id, module_key) DO NOTHING;
+
+INSERT INTO public.business_modules (business_id, module_key, enabled)
+SELECT id, 'custom_offerings', true FROM public.businesses
+ON CONFLICT (business_id, module_key) DO NOTHING;
+
+-- ---- 14.2 offerings: the one catalog the storefront reads ----
+
+CREATE TABLE IF NOT EXISTS public.offerings (
+  id                bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  business_id       uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  category_id       bigint REFERENCES public.categories(id) ON DELETE SET NULL,
+  name              text NOT NULL,
+  slug              text NOT NULL,
+  description       text,
+  image_url         text,
+  requires_pos      boolean NOT NULL DEFAULT false,
+  linked_product_id bigint REFERENCES public.store_products(id) ON DELETE CASCADE,
+  -- 'instant_purchase' | 'time_slot_booking' | 'file_upload_request' |
+  -- 'approval_required' | any owner-typed string. Deliberately not
+  -- CHECK-constrained: every consumer below switches on service_requests.status,
+  -- never on this column, so a brand-new value needs zero backend change.
+  fulfillment_type  text NOT NULL DEFAULT 'instant_purchase',
+  price             numeric(10,2),
+  price_label       text,
+  -- Ordered array of field definitions interpreted at runtime by the
+  -- storefront form and the admin drawer — see lib/offerings/field-schema.ts.
+  -- '[]' for an offering that needs no input beyond the built-in notes field.
+  metadata_schema   jsonb NOT NULL DEFAULT '[]',
+  is_active         boolean NOT NULL DEFAULT true,
+  sort_order        int NOT NULL DEFAULT 0,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (business_id, slug),
+  CONSTRAINT offerings_pos_link_chk CHECK (
+    (requires_pos AND linked_product_id IS NOT NULL) OR (NOT requires_pos AND linked_product_id IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS offerings_business_id_idx ON public.offerings(business_id);
+CREATE UNIQUE INDEX IF NOT EXISTS offerings_linked_product_idx
+  ON public.offerings(linked_product_id) WHERE linked_product_id IS NOT NULL;
+
+DROP TRIGGER IF EXISTS trg_offerings_updated_at ON public.offerings;
+CREATE TRIGGER trg_offerings_updated_at BEFORE UPDATE ON public.offerings
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- Same cross-tenant guard as validate_recipe_business(): a linked_product_id
+-- must belong to the same business as the offering wrapping it.
+CREATE OR REPLACE FUNCTION public.validate_offering_business()
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+DECLARE v_product_business uuid;
+BEGIN
+  IF NEW.linked_product_id IS NOT NULL THEN
+    SELECT business_id INTO v_product_business FROM public.store_products WHERE id = NEW.linked_product_id;
+    IF v_product_business IS DISTINCT FROM NEW.business_id THEN
+      RAISE EXCEPTION 'Offering and its linked product must belong to the same business';
+    END IF;
+  END IF;
+  RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS trg_validate_offering_business ON public.offerings;
+CREATE TRIGGER trg_validate_offering_business
+  BEFORE INSERT OR UPDATE ON public.offerings
+  FOR EACH ROW EXECUTE FUNCTION public.validate_offering_business();
+
+-- A POS-linked offering row is a mirror, not an independently-editable
+-- catalog entry — its name/price/image/is_active always come from
+-- store_products via sync_offering_for_product() below. This guard stops a
+-- direct client write from quietly re-pointing or un-linking one (the one
+-- way this pair could drift out of sync), while still allowing the sync
+-- trigger itself through via the same set_config()-flag technique
+-- report_cancelled_order() already uses elsewhere in this file.
+CREATE OR REPLACE FUNCTION public.protect_offering_pos_link()
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+  IF (NEW.requires_pos IS DISTINCT FROM OLD.requires_pos OR NEW.linked_product_id IS DISTINCT FROM OLD.linked_product_id)
+     AND current_setting('app.offering_sync_allowed', true) IS DISTINCT FROM 'true' THEN
+    RAISE EXCEPTION 'requires_pos and linked_product_id are managed automatically from the product catalog and cannot be edited directly';
+  END IF;
+  RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS trg_protect_offering_pos_link ON public.offerings;
+CREATE TRIGGER trg_protect_offering_pos_link BEFORE UPDATE ON public.offerings
+  FOR EACH ROW EXECUTE FUNCTION public.protect_offering_pos_link();
+
+-- Auto-mirror: creating/editing a store_products row keeps a matching
+-- offerings row in sync, so a retail seller never has to visit the Offering
+-- Builder to appear in the unified storefront feed — this is what makes "no
+-- change to the existing retail workflow" true in practice.
+CREATE OR REPLACE FUNCTION public.sync_offering_for_product()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM set_config('app.offering_sync_allowed', 'true', true);
+  INSERT INTO public.offerings (business_id, category_id, name, slug, description, image_url,
+                                 requires_pos, linked_product_id, fulfillment_type, price, is_active)
+  VALUES (NEW.business_id, NEW.category_id, NEW.name, NEW.slug, NEW.description, NEW.image_url,
+          true, NEW.id, 'instant_purchase', NEW.price, NEW.is_active)
+  ON CONFLICT (linked_product_id) WHERE linked_product_id IS NOT NULL DO UPDATE SET
+    name = NEW.name, category_id = NEW.category_id, description = NEW.description,
+    image_url = NEW.image_url, price = NEW.price, is_active = NEW.is_active, slug = NEW.slug;
+  RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS trg_sync_offering_for_product ON public.store_products;
+CREATE TRIGGER trg_sync_offering_for_product
+  AFTER INSERT OR UPDATE ON public.store_products
+  FOR EACH ROW EXECUTE FUNCTION public.sync_offering_for_product();
+
+-- One-time backfill for every store_products row that predates this section —
+-- from here on, trg_sync_offering_for_product keeps them in sync. Idempotent:
+-- a re-run of this script skips any row already mirrored.
+DO $$ BEGIN
+  PERFORM set_config('app.offering_sync_allowed', 'true', true);
+  INSERT INTO public.offerings (business_id, category_id, name, slug, description, image_url,
+                                 requires_pos, linked_product_id, fulfillment_type, price, is_active)
+  SELECT business_id, category_id, name, slug, description, image_url, true, id, 'instant_purchase', price, is_active
+  FROM public.store_products
+  ON CONFLICT (linked_product_id) WHERE linked_product_id IS NOT NULL DO NOTHING;
+END $$;
+
+-- Deleting an offering that wraps a retail product would leave the product
+-- with no storefront presence at all until its next edit re-triggers the
+-- sync — no accidental way to do that: only a custom (requires_pos = false)
+-- offering can be deleted directly. A POS-linked row disappears on its own,
+-- via ON DELETE CASCADE from store_products, when the product itself is deleted.
+CREATE OR REPLACE FUNCTION public.protect_offering_pos_delete()
+RETURNS trigger LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+  IF OLD.requires_pos AND current_setting('app.offering_sync_allowed', true) IS DISTINCT FROM 'true' THEN
+    RAISE EXCEPTION 'A POS-linked offering is removed by deleting its product on the Products page, not here';
+  END IF;
+  RETURN OLD;
+END; $$;
+DROP TRIGGER IF EXISTS trg_protect_offering_pos_delete ON public.offerings;
+CREATE TRIGGER trg_protect_offering_pos_delete BEFORE DELETE ON public.offerings
+  FOR EACH ROW EXECUTE FUNCTION public.protect_offering_pos_delete();
+
+-- ---- 14.3 service_requests & service_request_events: the non-POS pipeline ----
+
+CREATE TABLE IF NOT EXISTS public.service_requests (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id        uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+  offering_id        bigint NOT NULL REFERENCES public.offerings(id) ON DELETE RESTRICT,
+  -- Nullable: a walk-in customer who doesn't use the app at all has no
+  -- profiles row to point at. walk_in_name/walk_in_phone below stand in for
+  -- them instead — see service_requests_identity_chk, which requires one or
+  -- the other, never neither.
+  customer_id        uuid REFERENCES public.profiles(id) ON DELETE CASCADE,
+  walk_in_name       text,
+  walk_in_phone      text,
+  -- The staff/owner account that logged this on a walk-in customer's behalf
+  -- via log_walkin_service_request() below — NULL for a request the
+  -- customer submitted themselves online. Mirrors sales.created_by.
+  created_by         uuid REFERENCES auth.users(id),
+  -- Snapshotted from the offering at submission time so relabeling the
+  -- offering later never rewrites the history of an in-flight ticket.
+  fulfillment_type   text NOT NULL,
+  status             text NOT NULL DEFAULT 'submitted' CHECK (status IN (
+                       'submitted', 'in_review', 'accepted', 'in_progress',
+                       'awaiting_customer', 'completed', 'rejected', 'cancelled')),
+  form_data          jsonb NOT NULL DEFAULT '{}',
+  -- Reserved for files attached outside of any 'file' schema field (e.g. an
+  -- owner attaching a signed receipt later). A 'file' field's own uploads
+  -- live in form_data under that field's key instead — see
+  -- lib/offerings/field-schema.ts — so this stays empty for most requests.
+  attachments        jsonb NOT NULL DEFAULT '[]',
+  quoted_price       numeric(10,2),
+  agreed_price       numeric(10,2),
+  scheduled_at       timestamptz,
+  fulfillment_method text CHECK (fulfillment_method IN ('pickup', 'delivery', 'on_site', 'remote')),
+  -- Required, unconditionally, on the customer-facing online form (see
+  -- MapLocationPicker in DynamicOfferingRequestForm and the check inside
+  -- submit_service_request() below) — a walk-in a business owner logs via
+  -- log_walkin_service_request() may skip it instead, since the customer is
+  -- standing in the shop and there's nothing to pin. Not NOT NULL at the
+  -- column level for that reason: "required" is enforced per write-path,
+  -- inside each RPC, not by the table shape.
+  location_address   text,
+  location_lat       numeric(9,6),
+  location_lng       numeric(9,6),
+  customer_notes     text,
+  owner_notes        text,
+  rejection_reason   text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT service_requests_identity_chk CHECK (customer_id IS NOT NULL OR walk_in_name IS NOT NULL)
+);
+-- Additive, in case an earlier run of this script already created this table
+-- before location_address/lat/lng/walk-in support existed on it.
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS location_address text;
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS location_lat numeric(9,6);
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS location_lng numeric(9,6);
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS walk_in_name text;
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS walk_in_phone text;
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id);
+-- customer_id predates walk-ins and was created NOT NULL — relax it so a
+-- walk-in row (customer_id IS NULL, walk_in_name set instead) is legal.
+ALTER TABLE public.service_requests ALTER COLUMN customer_id DROP NOT NULL;
+ALTER TABLE public.service_requests DROP CONSTRAINT IF EXISTS service_requests_identity_chk;
+ALTER TABLE public.service_requests ADD CONSTRAINT service_requests_identity_chk
+  CHECK (customer_id IS NOT NULL OR walk_in_name IS NOT NULL);
+
+CREATE INDEX IF NOT EXISTS service_requests_business_id_idx ON public.service_requests(business_id, status);
+CREATE INDEX IF NOT EXISTS service_requests_customer_id_idx ON public.service_requests(customer_id);
+
+DROP TRIGGER IF EXISTS trg_service_requests_updated_at ON public.service_requests;
+CREATE TRIGGER trg_service_requests_updated_at BEFORE UPDATE ON public.service_requests
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TABLE IF NOT EXISTS public.service_request_events (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  request_id   uuid NOT NULL REFERENCES public.service_requests(id) ON DELETE CASCADE,
+  actor_id     uuid REFERENCES public.profiles(id),
+  actor_role   text NOT NULL CHECK (actor_role IN ('business', 'customer', 'system')),
+  event_type   text NOT NULL, -- 'submitted' | 'status_change' | 'comment' | 'quote_sent'
+  message      text,
+  metadata     jsonb NOT NULL DEFAULT '{}',
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS service_request_events_request_id_idx ON public.service_request_events(request_id, created_at);
+
+-- ---- 14.4 reading both pipelines as one queue ----
+
+-- Logical union, not a physical merge — store_orders/place_order()/
+-- process_sale() keep their own tables and triggers untouched.
+-- security_invoker MUST be true here (the opposite of marketplace_products,
+-- which is deliberately public): this view carries private order/request
+-- data, so it has to run as the QUERYING user, letting store_orders' and
+-- service_requests' own owner-only RLS policies keep doing their job —
+-- same pattern already used for business_cancellation_reports above.
+CREATE OR REPLACE VIEW public.v_orders_or_requests
+WITH (security_invoker = true) AS
+SELECT 'pos_order'::text AS kind, so.id::text AS id, so.business_id, so.customer_id,
+       so.status, so.total AS amount, NULL::jsonb AS form_data,
+       NULL::text AS fulfillment_type, so.created_at, so.updated_at
+FROM public.store_orders so
+UNION ALL
+SELECT 'service_request'::text, sr.id::text, sr.business_id, sr.customer_id,
+       sr.status, COALESCE(sr.agreed_price, sr.quoted_price, 0), sr.form_data,
+       sr.fulfillment_type, sr.created_at, sr.updated_at
+FROM public.service_requests sr;
+
+-- Storefront read surface for offerings, mirroring marketplace_products'
+-- shape. For a POS-linked row it reuses that view's already-correct
+-- recipe/ingredient stock math instead of re-deriving it.
+CREATE OR REPLACE VIEW public.marketplace_offerings
+WITH (security_invoker = false) AS
+SELECT o.id, o.business_id, o.name, o.slug, o.description, o.image_url,
+       o.requires_pos, o.linked_product_id, o.fulfillment_type,
+       o.price, o.price_label, o.metadata_schema, o.sort_order,
+       CASE WHEN o.requires_pos THEN mp.stock ELSE NULL END AS stock,
+       CASE WHEN o.requires_pos THEN mp.track_stock ELSE NULL END AS track_stock,
+       o.category_id, c.name AS category_name, c.slug AS category_slug,
+       b.name AS business_name, b.slug AS business_slug, b.business_type,
+       o.created_at
+FROM public.offerings o
+JOIN public.businesses b ON b.id = o.business_id AND b.status = 'approved'
+LEFT JOIN public.categories c ON c.id = o.category_id
+LEFT JOIN public.marketplace_products mp ON mp.id = o.linked_product_id
+WHERE o.is_active = true;
+
+GRANT SELECT ON public.marketplace_offerings TO anon, authenticated;
+
+-- ---- 14.5 form-schema validation ----
+
+-- Mirrors the client-side check in lib/offerings/field-schema.ts, but this
+-- one is the actual source of truth: client validation is a UX courtesy,
+-- this is what a crafted RPC call can't get past.
+CREATE OR REPLACE FUNCTION public.validate_form_data(p_schema jsonb, p_data jsonb)
+RETURNS void
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_field jsonb; v_key text; v_type text; v_required boolean; v_value jsonb;
+BEGIN
+  FOR v_field IN SELECT * FROM jsonb_array_elements(COALESCE(p_schema, '[]'::jsonb))
+  LOOP
+    v_key := v_field->>'key';
+    v_type := COALESCE(v_field->>'type', 'text');
+    v_required := COALESCE((v_field->>'required')::boolean, false);
+    v_value := COALESCE(p_data, '{}'::jsonb)->v_key;
+
+    IF v_required AND (v_value IS NULL OR v_value = 'null'::jsonb OR v_value = '""'::jsonb OR v_value = '[]'::jsonb) THEN
+      RAISE EXCEPTION 'Missing required field: %', COALESCE(v_field->>'label', v_key);
+    END IF;
+
+    IF v_value IS NOT NULL AND v_value <> 'null'::jsonb THEN
+      IF v_type = 'number' AND jsonb_typeof(v_value) <> 'number' THEN
+        RAISE EXCEPTION '% must be a number', COALESCE(v_field->>'label', v_key);
+      END IF;
+      IF v_type = 'select' AND v_field ? 'options'
+         AND NOT (v_field->'options' @> jsonb_build_array(v_value)) THEN
+        RAISE EXCEPTION '% is not one of the allowed options', COALESCE(v_field->>'label', v_key);
+      END IF;
+      IF v_type IN ('file', 'multiselect') AND jsonb_typeof(v_value) <> 'array' THEN
+        RAISE EXCEPTION '% must be a list', COALESCE(v_field->>'label', v_key);
+      END IF;
+    END IF;
+  END LOOP;
+END;
+$$;
+
+-- ---- 14.6 write paths: every service_requests mutation goes through one of these ----
+
+-- Customer submits a filled-out form against a non-POS offering. There is no
+-- direct INSERT policy on service_requests (see RLS below) — this is the
+-- only door, same discipline as place_order()/process_sale() for the POS side.
+--
+-- A location is required on every custom offering's request — unconditionally,
+-- not something an offering's metadata_schema opts into (see
+-- DynamicOfferingRequestForm, which always renders the map picker regardless
+-- of what fields the offering defines). Checked here, not just client-side,
+-- for the same reason place_order() re-checks a delivery address itself.
+CREATE OR REPLACE FUNCTION public.submit_service_request(
+  p_offering_id bigint,
+  p_form_data jsonb,
+  p_location_address text,
+  p_location_lat numeric,
+  p_location_lng numeric,
+  p_fulfillment_method text DEFAULT NULL,
+  p_customer_notes text DEFAULT NULL
+)
+RETURNS public.service_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_offering public.offerings;
+  v_request public.service_requests;
+  v_customer_schema jsonb;
+  v_admin_keys text[];
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_location_address IS NULL OR length(trim(p_location_address)) = 0 OR p_location_lat IS NULL OR p_location_lng IS NULL THEN
+    RAISE EXCEPTION 'Confirm a location on the map before sending this request';
+  END IF;
+
+  -- `o.*`, not a bare `*` — the join also pulls in businesses' own columns,
+  -- and v_offering is typed as public.offerings alone; selecting `*` here
+  -- would hand it more columns than its type has (the same class of error
+  -- as update_request_admin_fields()'s record-in-a-multi-item-INTO bug above).
+  SELECT o.* INTO v_offering FROM public.offerings o
+    JOIN public.businesses b ON b.id = o.business_id
+    WHERE o.id = p_offering_id AND o.is_active = true AND b.status = 'approved';
+  IF v_offering IS NULL THEN
+    RAISE EXCEPTION 'Offering not found or no longer available';
+  END IF;
+
+  IF v_offering.requires_pos THEN
+    RAISE EXCEPTION 'This offering is sold through the cart, not a request form';
+  END IF;
+
+  IF NOT public.business_has_module(v_offering.business_id, 'custom_offerings') THEN
+    RAISE EXCEPTION 'This shop is not currently accepting custom requests';
+  END IF;
+
+  IF p_fulfillment_method IS NOT NULL AND p_fulfillment_method NOT IN ('pickup', 'delivery', 'on_site', 'remote') THEN
+    RAISE EXCEPTION 'Invalid fulfillment method: %', p_fulfillment_method;
+  END IF;
+
+  -- admin_only fields (see OfferingField.admin_only) are never asked of the
+  -- customer, so they're excluded from validation here, and any value for
+  -- one is stripped from the incoming payload below rather than trusted —
+  -- a crafted call could otherwise pre-seed an internal field the owner is
+  -- meant to fill in themselves via update_request_admin_fields().
+  SELECT COALESCE(jsonb_agg(f), '[]'::jsonb) INTO v_customer_schema
+    FROM jsonb_array_elements(v_offering.metadata_schema) f
+    WHERE COALESCE((f->>'admin_only')::boolean, false) = false;
+  SELECT COALESCE(array_agg(f->>'key'), '{}') INTO v_admin_keys
+    FROM jsonb_array_elements(v_offering.metadata_schema) f
+    WHERE COALESCE((f->>'admin_only')::boolean, false) = true;
+
+  PERFORM public.validate_form_data(v_customer_schema, p_form_data);
+  p_form_data := COALESCE(p_form_data, '{}'::jsonb) - v_admin_keys;
+
+  INSERT INTO public.service_requests (
+    business_id, offering_id, customer_id, fulfillment_type, form_data,
+    location_address, location_lat, location_lng, fulfillment_method, customer_notes
+  ) VALUES (
+    v_offering.business_id, v_offering.id, v_uid, v_offering.fulfillment_type,
+    COALESCE(p_form_data, '{}'::jsonb), trim(p_location_address), p_location_lat, p_location_lng,
+    p_fulfillment_method, p_customer_notes
+  )
+  RETURNING * INTO v_request;
+
+  INSERT INTO public.service_request_events (request_id, actor_id, actor_role, event_type, message)
+  VALUES (v_request.id, v_uid, 'customer', 'submitted', 'Request submitted');
+
+  RETURN v_request;
+END;
+$$;
+
+-- The old 4-arg signature (before a location was required) is dropped
+-- explicitly rather than just CREATE OR REPLACE-d: an added required
+-- parameter makes this a different overload as far as Postgres is concerned,
+-- and this file needs to stay safe to re-run against a database that already
+-- has the old version.
+DROP FUNCTION IF EXISTS public.submit_service_request(bigint, jsonb, text, text);
+GRANT EXECUTE ON FUNCTION public.submit_service_request(bigint, jsonb, text, numeric, numeric, text, text) TO authenticated;
+
+-- A business owner logs a request on behalf of a walk-in customer who came
+-- into the shop in person and doesn't use the app — the admin-side
+-- counterpart to submit_service_request() above, filling out the exact same
+-- offering.metadata_schema form themselves instead of the customer doing it
+-- online. No customer_id: walk_in_name (required) and walk_in_phone
+-- (optional) identify them instead (see service_requests_identity_chk).
+-- Unlike the online path, a location is optional here — the customer is
+-- standing in front of the owner, so there's often nothing to pin.
+CREATE OR REPLACE FUNCTION public.log_walkin_service_request(
+  p_offering_id bigint,
+  p_form_data jsonb,
+  p_customer_name text,
+  p_customer_phone text DEFAULT NULL,
+  p_location_address text DEFAULT NULL,
+  p_location_lat numeric DEFAULT NULL,
+  p_location_lng numeric DEFAULT NULL,
+  p_fulfillment_method text DEFAULT NULL,
+  p_customer_notes text DEFAULT NULL,
+  p_owner_notes text DEFAULT NULL
+)
+RETURNS public.service_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_offering public.offerings;
+  v_request public.service_requests;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_customer_name IS NULL OR length(trim(p_customer_name)) = 0 THEN
+    RAISE EXCEPTION 'A name is required to log a request for a walk-in customer';
+  END IF;
+
+  SELECT * INTO v_offering FROM public.offerings WHERE id = p_offering_id;
+  IF v_offering IS NULL THEN
+    RAISE EXCEPTION 'Offering not found';
+  END IF;
+
+  -- Ownership check doubles as the tenant boundary: an owner can only log a
+  -- walk-in against their own offering, never another shop's.
+  IF NOT EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = v_offering.business_id AND b.owner_id = v_uid) THEN
+    RAISE EXCEPTION 'You can only log requests for your own shop';
+  END IF;
+
+  IF v_offering.requires_pos THEN
+    RAISE EXCEPTION 'This offering is sold through the cart, not a request form';
+  END IF;
+
+  IF p_fulfillment_method IS NOT NULL AND p_fulfillment_method NOT IN ('pickup', 'delivery', 'on_site', 'remote') THEN
+    RAISE EXCEPTION 'Invalid fulfillment method: %', p_fulfillment_method;
+  END IF;
+
+  PERFORM public.validate_form_data(v_offering.metadata_schema, p_form_data);
+
+  INSERT INTO public.service_requests (
+    business_id, offering_id, customer_id, walk_in_name, walk_in_phone, created_by,
+    fulfillment_type, form_data, location_address, location_lat, location_lng,
+    fulfillment_method, customer_notes, owner_notes
+  ) VALUES (
+    v_offering.business_id, v_offering.id, NULL, trim(p_customer_name), NULLIF(trim(COALESCE(p_customer_phone, '')), ''), v_uid,
+    v_offering.fulfillment_type, COALESCE(p_form_data, '{}'::jsonb), p_location_address, p_location_lat, p_location_lng,
+    p_fulfillment_method, p_customer_notes, p_owner_notes
+  )
+  RETURNING * INTO v_request;
+
+  INSERT INTO public.service_request_events (request_id, actor_id, actor_role, event_type, message)
+  VALUES (v_request.id, v_uid, 'business', 'submitted', 'Logged in person by ' || COALESCE((SELECT full_name FROM public.profiles WHERE id = v_uid), 'the shop'));
+
+  RETURN v_request;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.log_walkin_service_request(bigint, jsonb, text, text, text, numeric, numeric, text, text, text) TO authenticated;
+
+-- Business owner moves a ticket through its lifecycle, sends a quote, and/or
+-- leaves a message — all in one call, logging exactly one combined event.
+-- Legal status transitions are enforced here, the only place status can
+-- change (no direct UPDATE policy — see RLS below).
+CREATE OR REPLACE FUNCTION public.update_service_request(
+  p_request_id uuid,
+  p_status text DEFAULT NULL,
+  p_message text DEFAULT NULL,
+  p_quoted_price numeric DEFAULT NULL,
+  p_agreed_price numeric DEFAULT NULL,
+  p_scheduled_at timestamptz DEFAULT NULL,
+  p_rejection_reason text DEFAULT NULL
+)
+RETURNS public.service_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_request public.service_requests;
+  v_is_owner boolean;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT * INTO v_request FROM public.service_requests WHERE id = p_request_id FOR UPDATE;
+  IF v_request.id IS NULL THEN
+    RAISE EXCEPTION 'Request not found';
+  END IF;
+
+  SELECT EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = v_request.business_id AND b.owner_id = v_uid)
+    INTO v_is_owner;
+  IF NOT v_is_owner AND public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only the business that owns this request can update it';
+  END IF;
+
+  IF p_status IS NOT NULL AND p_status IS DISTINCT FROM v_request.status THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM (VALUES
+        ('submitted', 'in_review'), ('submitted', 'rejected'),
+        ('in_review', 'accepted'), ('in_review', 'rejected'),
+        ('accepted', 'in_progress'), ('accepted', 'cancelled'),
+        ('in_progress', 'awaiting_customer'), ('in_progress', 'completed'), ('in_progress', 'cancelled'),
+        ('awaiting_customer', 'in_progress')
+      ) AS t(from_status, to_status)
+      WHERE t.from_status = v_request.status AND t.to_status = p_status
+    ) THEN
+      RAISE EXCEPTION 'Cannot move a request from % to %', v_request.status, p_status;
+    END IF;
+    IF p_status = 'rejected' AND (p_rejection_reason IS NULL OR length(trim(p_rejection_reason)) = 0) THEN
+      RAISE EXCEPTION 'A reason is required to reject a request';
+    END IF;
+  END IF;
+
+  UPDATE public.service_requests SET
+    status = COALESCE(p_status, status),
+    quoted_price = COALESCE(p_quoted_price, quoted_price),
+    agreed_price = COALESCE(p_agreed_price, agreed_price),
+    scheduled_at = COALESCE(p_scheduled_at, scheduled_at),
+    rejection_reason = CASE WHEN p_status = 'rejected' THEN p_rejection_reason ELSE rejection_reason END
+  WHERE id = p_request_id
+  RETURNING * INTO v_request;
+
+  IF p_status IS NOT NULL OR p_message IS NOT NULL OR p_quoted_price IS NOT NULL OR p_agreed_price IS NOT NULL THEN
+    INSERT INTO public.service_request_events (request_id, actor_id, actor_role, event_type, message, metadata)
+    VALUES (
+      p_request_id, v_uid, 'business',
+      CASE
+        WHEN p_status IS NOT NULL THEN 'status_change'
+        WHEN p_quoted_price IS NOT NULL OR p_agreed_price IS NOT NULL THEN 'quote_sent'
+        ELSE 'comment'
+      END,
+      p_message,
+      jsonb_strip_nulls(jsonb_build_object('status', p_status, 'quoted_price', p_quoted_price, 'agreed_price', p_agreed_price))
+    );
+  END IF;
+
+  RETURN v_request;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_service_request(uuid, text, text, numeric, numeric, timestamptz, text) TO authenticated;
+
+-- Fills in / edits the offering's admin_only fields (see OfferingField in
+-- lib/types/marketplace.ts) — the structured, per-field alternative to the
+-- one free-text owner_notes box: "Assigned technician," "Diagnosis code,"
+-- whatever the owner defined as internal-only on this offering. Callable on
+-- any request at any time regardless of status, since there's no customer-
+-- facing transition to protect here (unlike update_service_request()) — the
+-- customer never sees these fields or this event at all. p_patch is merged
+-- into form_data (jsonb ||), never replacing it, so this can never touch a
+-- key the customer themselves submitted.
+CREATE OR REPLACE FUNCTION public.update_request_admin_fields(p_request_id uuid, p_patch jsonb)
+RETURNS public.service_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_request public.service_requests;
+  v_schema jsonb;
+  v_admin_keys text[];
+  v_patch_keys text[];
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- A record variable (v_request) can't share an INTO list with another
+  -- target in PL/pgSQL ("record variable cannot be part of multiple-item
+  -- INTO list") — so this is two SELECTs, not one join-and-split.
+  SELECT sr.* INTO v_request
+  FROM public.service_requests sr
+  JOIN public.businesses b ON b.id = sr.business_id
+  WHERE sr.id = p_request_id AND (b.owner_id = v_uid OR public.current_user_role() = 'super_admin')
+  FOR UPDATE OF sr;
+
+  IF v_request.id IS NULL THEN
+    RAISE EXCEPTION 'Request not found';
+  END IF;
+
+  SELECT o.metadata_schema INTO v_schema FROM public.offerings o WHERE o.id = v_request.offering_id;
+
+  SELECT COALESCE(array_agg(f->>'key'), '{}') INTO v_admin_keys
+    FROM jsonb_array_elements(v_schema) f
+    WHERE COALESCE((f->>'admin_only')::boolean, false) = true;
+  SELECT COALESCE(array_agg(k), '{}') INTO v_patch_keys FROM jsonb_object_keys(COALESCE(p_patch, '{}'::jsonb)) k;
+
+  IF EXISTS (SELECT 1 FROM unnest(v_patch_keys) k WHERE NOT (k = ANY(v_admin_keys))) THEN
+    RAISE EXCEPTION 'This offering has no admin-only field matching one of the submitted keys';
+  END IF;
+
+  UPDATE public.service_requests
+  SET form_data = form_data || COALESCE(p_patch, '{}'::jsonb)
+  WHERE id = p_request_id
+  RETURNING * INTO v_request;
+
+  RETURN v_request;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_request_admin_fields(uuid, jsonb) TO authenticated;
+
+-- Either side of a ticket can leave a message without touching its status —
+-- the customer's reply box and the owner's drawer both call this. Which
+-- actor_role gets stamped is derived from who's calling, never trusted from
+-- the client.
+CREATE OR REPLACE FUNCTION public.add_request_comment(p_request_id uuid, p_message text)
+RETURNS public.service_request_events
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_event public.service_request_events;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+  IF p_message IS NULL OR length(trim(p_message)) = 0 THEN
+    RAISE EXCEPTION 'Comment cannot be empty';
+  END IF;
+
+  INSERT INTO public.service_request_events (request_id, actor_id, actor_role, event_type, message)
+  SELECT p_request_id, v_uid, CASE WHEN sr.customer_id = v_uid THEN 'customer' ELSE 'business' END, 'comment', trim(p_message)
+  FROM public.service_requests sr
+  LEFT JOIN public.businesses b ON b.id = sr.business_id
+  WHERE sr.id = p_request_id AND (sr.customer_id = v_uid OR b.owner_id = v_uid OR public.current_user_role() = 'super_admin')
+  RETURNING * INTO v_event;
+
+  IF v_event.id IS NULL THEN
+    RAISE EXCEPTION 'Request not found';
+  END IF;
+
+  RETURN v_event;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.add_request_comment(uuid, text) TO authenticated;
+
+-- ---- 14.7 row level security ----
+
+ALTER TABLE public.business_modules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "business_modules_select_own_or_admin" ON public.business_modules;
+CREATE POLICY "business_modules_select_own_or_admin" ON public.business_modules FOR SELECT
+  USING (
+    EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = business_modules.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- Capabilities are platform-managed, not self-service — an owner sees their
+-- own flags but only a super_admin flips them. (business_has_module() above
+-- is SECURITY DEFINER specifically so a *customer* can still read the flag
+-- despite having no policy match here at all.)
+DROP POLICY IF EXISTS "business_modules_write_super_admin" ON public.business_modules;
+CREATE POLICY "business_modules_write_super_admin" ON public.business_modules FOR ALL
+  USING (public.current_user_role() = 'super_admin')
+  WITH CHECK (public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.module_definitions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "module_definitions_select_all" ON public.module_definitions;
+CREATE POLICY "module_definitions_select_all" ON public.module_definitions FOR SELECT USING (true);
+DROP POLICY IF EXISTS "module_definitions_write_super_admin" ON public.module_definitions;
+CREATE POLICY "module_definitions_write_super_admin" ON public.module_definitions FOR ALL
+  USING (public.current_user_role() = 'super_admin')
+  WITH CHECK (public.current_user_role() = 'super_admin');
+
+ALTER TABLE public.offerings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "offerings_select_public_or_own" ON public.offerings;
+CREATE POLICY "offerings_select_public_or_own" ON public.offerings FOR SELECT
+  USING (
+    (is_active = true AND EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = offerings.business_id AND b.status = 'approved'))
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = offerings.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- Direct table writes (no RPC) — same convention as store_products, since
+-- ownership + the two guard triggers above are already enough protection.
+DROP POLICY IF EXISTS "offerings_write_owner" ON public.offerings;
+CREATE POLICY "offerings_write_owner" ON public.offerings FOR ALL
+  USING (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = offerings.business_id AND b.owner_id = auth.uid() AND b.status = 'approved'))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = offerings.business_id AND b.owner_id = auth.uid() AND b.status = 'approved'));
+
+ALTER TABLE public.service_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "service_requests_select_participant" ON public.service_requests;
+CREATE POLICY "service_requests_select_participant" ON public.service_requests FOR SELECT
+  USING (
+    customer_id = auth.uid()
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = service_requests.business_id AND b.owner_id = auth.uid())
+    OR public.current_user_role() = 'super_admin'
+  );
+-- No INSERT/UPDATE policy at all: every write goes through
+-- submit_service_request() / update_service_request() (both SECURITY
+-- DEFINER), the same discipline place_order()/process_sale() already use for
+-- the POS side.
+
+ALTER TABLE public.service_request_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "service_request_events_select_participant" ON public.service_request_events;
+CREATE POLICY "service_request_events_select_participant" ON public.service_request_events FOR SELECT
+  USING (EXISTS (
+    SELECT 1 FROM public.service_requests sr
+    LEFT JOIN public.businesses b ON b.id = sr.business_id
+    WHERE sr.id = service_request_events.request_id
+      AND (sr.customer_id = auth.uid() OR b.owner_id = auth.uid() OR public.current_user_role() = 'super_admin')
+  ));
+-- Writes only via submit_service_request() / update_service_request() /
+-- add_request_comment() — no direct INSERT policy.
+
+-- ---- 14.8 attachment storage ----
+--
+-- Deliberately a PUBLIC bucket with a random, unguessable path segment per
+-- upload — the same trust posture this app already has for every other
+-- image (store_products.image_url, businesses.logo_url, ...: a plain public
+-- URL, no signed-URL infrastructure exists anywhere in this codebase). This
+-- is a known, explicit trade-off: a file_upload_request offering can ask for
+-- something sensitive (a valid ID for a pa-utang application), and "public
+-- but hard to guess" is weaker than a private bucket with signed URLs. If a
+-- business owner ever collects genuinely sensitive documents at scale, this
+-- bucket should be flipped to private with signed URLs generated server-side
+-- — flagged here rather than silently shipped as if it were already hardened.
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('service-request-uploads', 'service-request-uploads', true, 10485760)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "service_request_uploads_insert_own_folder" ON storage.objects;
+CREATE POLICY "service_request_uploads_insert_own_folder" ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'service-request-uploads' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+DROP POLICY IF EXISTS "service_request_uploads_select_public" ON storage.objects;
+CREATE POLICY "service_request_uploads_select_public" ON storage.objects FOR SELECT
+  USING (bucket_id = 'service-request-uploads');
+
+DROP POLICY IF EXISTS "service_request_uploads_delete_own" ON storage.objects;
+CREATE POLICY "service_request_uploads_delete_own" ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'service-request-uploads' AND (storage.foldername(name))[1] = auth.uid()::text);

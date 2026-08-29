@@ -7,7 +7,9 @@ import type {
   AffiliateCommissionStatus,
   AffiliatePayoutStatus,
   FulfillmentMethod,
+  ServiceRequestStatus,
 } from '@/lib/types/marketplace'
+import { SERVICE_REQUEST_STATUS_LABELS } from '@/lib/offerings/field-schema'
 
 // One color per semantic meaning, reused across every status pill in the
 // app: amber = waiting, sky/violet = in progress, emerald = good outcome,
@@ -73,6 +75,20 @@ const PAYOUT_STYLES: Record<AffiliatePayoutStatus, string> = {
 }
 export function PayoutStatusBadge({ status }: { status: AffiliatePayoutStatus }) {
   return <StatusPill label={status} className={PAYOUT_STYLES[status]} />
+}
+
+const SERVICE_REQUEST_STYLES: Record<ServiceRequestStatus, string> = {
+  submitted: WAITING,
+  in_review: IN_PROGRESS,
+  accepted: IN_PROGRESS,
+  in_progress: SHIPPED,
+  awaiting_customer: WAITING,
+  completed: GOOD,
+  rejected: BAD,
+  cancelled: BAD,
+}
+export function ServiceRequestStatusBadge({ status }: { status: ServiceRequestStatus }) {
+  return <StatusPill label={SERVICE_REQUEST_STATUS_LABELS[status]} className={SERVICE_REQUEST_STYLES[status]} />
 }
 
 export function FulfillmentBadge({ method }: { method: FulfillmentMethod }) {

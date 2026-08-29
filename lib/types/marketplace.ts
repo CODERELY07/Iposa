@@ -236,6 +236,186 @@ export type AffiliatePayout = {
   businesses?: { name: string; slug: string } | null
 }
 
+// ---------------------------------------------------------------------------
+// Hybrid offerings & service requests — see database_schema.sql SECTION 14.
+// None of this changes how a retail item behaves: a StoreProduct still flows
+// through store_orders/sales exactly as above. `Offering` is the one catalog
+// the storefront reads; a row either mirrors a StoreProduct (requires_pos)
+// or stands alone with its own price and a JSON-defined form.
+// ---------------------------------------------------------------------------
+
+// Free text on the database (see business_modules.module_key) so a future
+// capability nobody has thought of yet can be turned on without a schema
+// change — this union documents the keys the app currently ships UI for.
+export type ModuleKey = 'pos' | 'custom_offerings' | (string & {})
+
+export type BusinessModule = {
+  business_id: string
+  module_key: ModuleKey
+  enabled: boolean
+  config: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+// The four presets the Offering Builder quick-picks, plus room for any
+// owner-typed string — nothing downstream (Kanban, status pipeline, RPCs)
+// branches on this value, only on ServiceRequestStatus, so a custom string
+// works with zero backend change.
+export type FulfillmentType =
+  | 'instant_purchase'
+  | 'time_slot_booking'
+  | 'file_upload_request'
+  | 'approval_required'
+  | (string & {})
+
+export type OfferingFieldType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'select'
+  | 'multiselect'
+  | 'date'
+  | 'datetime'
+  | 'file'
+  | 'address'
+
+// One entry in offerings.metadata_schema — see lib/offerings/field-schema.ts
+// for the renderer and validator that interpret this shape.
+export type OfferingField = {
+  key: string
+  label: string
+  type: OfferingFieldType
+  required: boolean
+  // true = an internal field the customer never sees or fills in —
+  // DynamicOfferingRequestForm and the customer's own tracking page both
+  // skip it entirely. The business owner fills/edits it instead, anytime,
+  // from the Kanban drawer (see update_request_admin_fields() in
+  // database_schema.sql) — a structured alternative to the one big
+  // owner_notes text box, for things like "Assigned technician" or
+  // "Diagnosis code" that vary per request. Absent/false = normal,
+  // customer-visible field.
+  admin_only?: boolean
+  placeholder?: string
+  options?: string[]
+  min?: number
+  max?: number
+  max_files?: number
+  accept?: string
+}
+
+export type Offering = {
+  id: number
+  business_id: string
+  category_id: number | null
+  name: string
+  slug: string
+  description: string | null
+  image_url: string | null
+  requires_pos: boolean
+  linked_product_id: number | null
+  fulfillment_type: FulfillmentType
+  price: number | null
+  price_label: string | null
+  metadata_schema: OfferingField[]
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+// Row shape returned by the public.marketplace_offerings view.
+export type MarketplaceOffering = {
+  id: number
+  business_id: string
+  name: string
+  slug: string
+  description: string | null
+  image_url: string | null
+  requires_pos: boolean
+  linked_product_id: number | null
+  fulfillment_type: FulfillmentType
+  price: number | null
+  price_label: string | null
+  metadata_schema: OfferingField[]
+  sort_order: number
+  stock: number | null
+  track_stock: boolean | null
+  category_id: number | null
+  category_name: string | null
+  category_slug: string | null
+  business_name: string
+  business_slug: string
+  business_type: BusinessType
+  created_at: string
+}
+
+export type ServiceRequestStatus =
+  | 'submitted'
+  | 'in_review'
+  | 'accepted'
+  | 'in_progress'
+  | 'awaiting_customer'
+  | 'completed'
+  | 'rejected'
+  | 'cancelled'
+
+// Broader than the POS side's FulfillmentMethod ('on_site'/'remote' cover a
+// repair drop-off or a fully remote service like an online consult).
+export type RequestFulfillmentMethod = 'pickup' | 'delivery' | 'on_site' | 'remote'
+
+export type UploadedFile = { url: string; filename: string; uploaded_at: string }
+
+export type ServiceRequest = {
+  id: string
+  business_id: string
+  offering_id: number
+  // Null for a walk-in the business logged in person (see
+  // log_walkin_service_request()) — walk_in_name/walk_in_phone identify them
+  // instead. A request the customer submitted themselves online always has
+  // this set and both walk-in fields null.
+  customer_id: string | null
+  walk_in_name: string | null
+  walk_in_phone: string | null
+  // The staff/owner account that logged this on a walk-in's behalf — null
+  // for a request the customer submitted themselves.
+  created_by: string | null
+  fulfillment_type: FulfillmentType
+  status: ServiceRequestStatus
+  form_data: Record<string, unknown>
+  attachments: UploadedFile[]
+  quoted_price: number | null
+  agreed_price: number | null
+  scheduled_at: string | null
+  // Required on the customer-facing online form (DynamicOfferingRequestForm
+  // always renders the map picker); optional on a walk-in a business owner
+  // logs in person, since the customer is standing right there.
+  location_address: string | null
+  location_lat: number | null
+  location_lng: number | null
+  fulfillment_method: RequestFulfillmentMethod | null
+  customer_notes: string | null
+  owner_notes: string | null
+  rejection_reason: string | null
+  created_at: string
+  updated_at: string
+  offerings?: { name: string; metadata_schema: OfferingField[] } | null
+}
+
+export type ServiceRequestEventType = 'submitted' | 'status_change' | 'comment' | 'quote_sent'
+export type ServiceRequestActorRole = 'business' | 'customer' | 'system'
+
+export type ServiceRequestEvent = {
+  id: number
+  request_id: string
+  actor_id: string | null
+  actor_role: ServiceRequestActorRole
+  event_type: ServiceRequestEventType
+  message: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
 export type CartItem = {
   productId: number
   name: string

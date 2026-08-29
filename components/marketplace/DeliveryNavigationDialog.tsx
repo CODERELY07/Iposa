@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css'
 import { haversineDistanceKm } from '@/lib/marketplace/distance'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Navigation, LocateFixed, AlertCircle } from 'lucide-react'
+import { LocateFixed, AlertCircle } from 'lucide-react'
 
 const PIN_ZOOM = 15
 
@@ -14,11 +14,9 @@ const PIN_ZOOM = 15
 // checkout) plus the rider's own live position (browser Geolocation,
 // `watchPosition` so it keeps updating as they move), both on the same
 // Leaflet/OpenStreetMap map already used elsewhere — no Google Maps API key,
-// no billing, no routing backend. The dashed line + distance figure is
-// straight-line (see lib/marketplace/distance.ts), not a road route — actual
-// turn-by-turn is deliberately handed off to Google Maps/Waze below rather
-// than reimplemented here, since a live-GPS-heading nav UI is a much bigger
-// (and safety-relevant) undertaking than this app needs to own.
+// no billing, no routing backend, and no external hand-off to Google
+// Maps/Waze either: this in-app map (dashed straight-line distance, see
+// lib/marketplace/distance.ts) is the whole feature.
 export default function DeliveryNavigationDialog({
   open,
   onOpenChange,
@@ -109,7 +107,7 @@ export default function DeliveryNavigationDialog({
   useEffect(() => {
     if (!open) return
     if (!('geolocation' in navigator)) {
-      setLocateError("This browser can't share your location — you can still open Navigate below.")
+      setLocateError("This browser can't share your location — the map will still show the customer's pin.")
       return
     }
 
@@ -122,8 +120,8 @@ export default function DeliveryNavigationDialog({
         setRiderPosition(null)
         setLocateError(
           err.code === err.PERMISSION_DENIED
-            ? 'Location access denied — enable it for this site to see your position on the map. Navigate below still works.'
-            : "Couldn't get your location. Navigate below still works."
+            ? "Location access denied — enable it for this site to see your own position on the map."
+            : "Couldn't get your location. The customer's pin still shows below."
         )
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
@@ -186,12 +184,6 @@ export default function DeliveryNavigationDialog({
     ? haversineDistanceKm(riderPosition.lat, riderPosition.lng, customerLat, customerLng)
     : null
 
-  // No origin param: Google Maps fills it in as "My current location" via
-  // its own device permission prompt, so this needs no coordinates of ours
-  // at all — just the destination. Same idea for Waze.
-  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${customerLat},${customerLng}&travelmode=driving`
-  const wazeUrl = `https://waze.com/ul?ll=${customerLat}%2C${customerLng}&navigate=yes`
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -213,22 +205,13 @@ export default function DeliveryNavigationDialog({
 
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <LocateFixed className="size-3 shrink-0" />
-          The dashed line is a straight-line distance, not the actual road route — tap Navigate below for real
-          turn-by-turn driving directions.
+          The dashed line is a straight-line distance, not the actual road route.
         </div>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+        <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <div className="flex gap-2">
-            <Button variant="outline" className="gap-1.5" render={<a href={wazeUrl} target="_blank" rel="noopener noreferrer" />}>
-              <Navigation className="size-4" /> Waze
-            </Button>
-            <Button className="gap-1.5" render={<a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" />}>
-              <Navigation className="size-4" /> Google Maps
-            </Button>
-          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

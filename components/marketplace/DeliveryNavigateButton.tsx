@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils'
 
 // Thin trigger for DeliveryNavigationDialog — the business/rider-facing
 // counterpart to ViewOnMapButton's plain pin view: this one also plots the
-// rider's own live position and offers real turn-by-turn via Google
-// Maps/Waze. Used on the Online Orders page for a delivery order's pin.
+// rider's own live position alongside the customer's, all on the same
+// in-app Leaflet map (no hand-off to an external maps app). Used on the
+// Online Orders page for a delivery order's pin.
 export default function DeliveryNavigateButton({
   lat,
   lng,

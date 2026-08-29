@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import ProductCard from '@/components/marketplace/ProductCard'
+import OfferingCard from '@/components/marketplace/OfferingCard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sparkles, PackageX, Store, PackageSearch, LayoutGrid } from 'lucide-react'
 import { BUSINESS_TYPE_OPTIONS, getBusinessTypeMeta } from '@/lib/business/type-meta'
-import type { BusinessType, MarketplaceProduct } from '@/lib/types/marketplace'
+import type { BusinessType, MarketplaceProduct, MarketplaceOffering } from '@/lib/types/marketplace'
 
 type SearchParams = {
   type?: string
@@ -59,6 +60,23 @@ export default async function MarketplaceHomePage({
   if (params.max_price) query = query.lte('price', Number(params.max_price))
   if (params.q) query = query.ilike('name', `%${params.q}%`)
 
+  // The non-POS half of the catalog — a service business's real, priced
+  // offerings otherwise had zero presence anywhere on this page (only
+  // marketplace_products was ever queried here), which is exactly what made
+  // "Services: 0 listed" show up next to a shop that had actual paid
+  // offerings live on its own storefront. Deliberately NOT filtered by
+  // category/min_price/max_price like the product query above — those
+  // facets (and their price-range assumption) don't map cleanly onto a
+  // "quote on request" offering with no fixed price.
+  let offeringsQuery = supabase
+    .from('marketplace_offerings')
+    .select('*')
+    .eq('requires_pos', false)
+    .order('created_at', { ascending: false })
+  if (activeType) offeringsQuery = offeringsQuery.eq('business_type', activeType)
+  if (params.business) offeringsQuery = offeringsQuery.eq('business_slug', params.business)
+  if (params.q) offeringsQuery = offeringsQuery.ilike('name', `%${params.q}%`)
+
   let businessQuery = supabase
     .from('businesses')
     .select('id, name, slug, description, logo_url, business_type')
@@ -78,6 +96,7 @@ export default async function MarketplaceHomePage({
 
   const [
     { data: products, error },
+    { data: offerings, error: offeringsError },
     { data: categoryRows },
     { data: businesses },
     { count: totalProductCount },
@@ -85,8 +104,12 @@ export default async function MarketplaceHomePage({
     { count: restaurantCount },
     { count: servicesCount },
     { count: retailCount },
+    { count: restaurantOfferingCount },
+    { count: servicesOfferingCount },
+    { count: retailOfferingCount },
   ] = await Promise.all([
     query,
+    offeringsQuery,
     categoryScope,
     businessQuery,
     supabase.from('marketplace_products').select('*', { count: 'exact', head: true }),
@@ -94,13 +117,20 @@ export default async function MarketplaceHomePage({
     supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'restaurant'),
     supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'services'),
     supabase.from('marketplace_products').select('*', { count: 'exact', head: true }).eq('business_type', 'retail'),
+    supabase.from('marketplace_offerings').select('*', { count: 'exact', head: true }).eq('requires_pos', false).eq('business_type', 'restaurant'),
+    supabase.from('marketplace_offerings').select('*', { count: 'exact', head: true }).eq('requires_pos', false).eq('business_type', 'services'),
+    supabase.from('marketplace_offerings').select('*', { count: 'exact', head: true }).eq('requires_pos', false).eq('business_type', 'retail'),
   ])
 
+  // Each tile counts products and non-POS offerings together — a services
+  // business with zero retail products but real, priced offerings should
+  // never read "0 listed" on its own vertical.
   const typeCounts: Record<BusinessType, number> = {
-    restaurant: restaurantCount ?? 0,
-    services: servicesCount ?? 0,
-    retail: retailCount ?? 0,
+    restaurant: (restaurantCount ?? 0) + (restaurantOfferingCount ?? 0),
+    services: (servicesCount ?? 0) + (servicesOfferingCount ?? 0),
+    retail: (retailCount ?? 0) + (retailOfferingCount ?? 0),
   }
+  const totalListedCount = typeCounts.restaurant + typeCounts.services + typeCounts.retail
 
   // Deduped in JS rather than a second round trip / a dedicated view — the
   // category taxonomy is small (see SECTION 3 in database_schema.sql), so
@@ -121,6 +151,7 @@ export default async function MarketplaceHomePage({
   const activeCategory = categories.find(c => c.slug === params.category)
   const activeTypeMeta = activeType ? getBusinessTypeMeta(activeType) : undefined
   const list = (products as MarketplaceProduct[]) ?? []
+  const offeringsList = (offerings as MarketplaceOffering[]) ?? []
   const featuredShops = (businesses ?? []).slice(0, 3)
 
   // Builds a browse-page link that keeps every current filter except the
@@ -259,7 +290,7 @@ export default async function MarketplaceHomePage({
                 <div className="text-[15px] font-semibold text-foreground">All types</div>
                 <div className="text-[12.5px] leading-snug text-muted-foreground">Every shop, one feed</div>
               </div>
-              <div className="label-mono mt-auto text-[11px]">{totalProductCount ?? 0} listed</div>
+              <div className="label-mono mt-auto text-[11px]">{totalListedCount} listed</div>
             </Link>
 
             {BUSINESS_TYPE_OPTIONS.map(opt => {
@@ -378,23 +409,57 @@ export default async function MarketplaceHomePage({
           </div>
         )}
 
-        {!error && list.length === 0 && (
+        {!error && list.length === 0 && offeringsList.length === 0 && (
           <div className="mb-4 flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-input bg-card py-18.5 text-center">
             <span className="flex size-14 items-center justify-center rounded-2xl bg-gradient-brand-soft">
               <PackageX className="size-6 text-primary" />
             </span>
-            <p className="text-sm text-muted-foreground">No products match your filters yet.</p>
+            <p className="text-sm text-muted-foreground">Nothing matches your filters yet.</p>
             {hasFilters && (
               <Button variant="outline" size="sm" render={<Link href="/#browse" />}>Clear filters</Button>
             )}
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
-          {list.map(p => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {list.length > 0 && (
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+            {list.map(p => (
+              <ProductCard key={p.id} product={p} />
+            ))}
+          </div>
+        )}
+
+        {/* The non-POS half of the catalog, kept in its own section rather
+            than intermixed into the product grid above — same split a single
+            shop's own storefront already uses (see shop/[slug]/page.tsx):
+            these aren't bought through a cart, so they don't belong in a grid
+            whose cards all say "Add to cart". */}
+        {offeringsError && (
+          <div className="mb-4 mt-6 rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
+            Failed to load services: {offeringsError.message}
+          </div>
+        )}
+
+        {offeringsList.length > 0 && (
+          <div className={list.length > 0 ? 'mt-11' : ''}>
+            <div className="mb-4 flex items-baseline justify-between gap-4">
+              <h2 className="flex items-center gap-1.5 font-serif text-[22px] font-normal tracking-[-0.01em] text-foreground">
+                <Sparkles className="size-4 text-primary" /> Services &amp; requests
+              </h2>
+              <span className="label-mono shrink-0 text-[11.5px] tracking-[0.06em]">
+                {offeringsList.length} {offeringsList.length === 1 ? 'listing' : 'listings'}
+              </span>
+            </div>
+            <p className="mb-4 text-sm text-muted-foreground">
+              These aren&apos;t bought through a cart — send a request and the shop follows up directly.
+            </p>
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+              {offeringsList.map(o => (
+                <OfferingCard key={o.id} offering={o} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Shops worth following */}
