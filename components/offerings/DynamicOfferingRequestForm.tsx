@@ -31,16 +31,23 @@ type LocationValue = { address: string; lat: number; lng: number }
 // requirement server-side.
 export default function DynamicOfferingRequestForm({
   offering,
+  refCode = null,
   onSubmit,
   onUploadFile,
 }: {
   offering: MarketplaceOffering
+  // This exact page's own `?ref=` query param (read server-side and passed
+  // down) — mirrors ProductPageActions' refCode. Forwarded into onSubmit so
+  // submit_service_request() can stamp it onto the request; never recorded
+  // just from viewing the page.
+  refCode?: string | null
   onSubmit: (payload: {
     offeringId: number
     formData: Record<string, unknown>
     location: LocationValue
     fulfillmentMethod: RequestFulfillmentMethod | null
     customerNotes: string | null
+    refCode: string | null
   }) => Promise<{ success: boolean; message?: string; requestId?: string }>
   onUploadFile: (file: File) => Promise<UploadedFile>
 }) {
@@ -85,6 +92,7 @@ export default function DynamicOfferingRequestForm({
         location,
         fulfillmentMethod: fulfillmentMethod || null,
         customerNotes: notes.trim() || null,
+        refCode,
       })
       if (!result.success) {
         setSubmitError(result.message ?? 'Something went wrong. Please try again.')

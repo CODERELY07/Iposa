@@ -10,6 +10,7 @@ export async function submitServiceRequestAction(payload: {
   location: { address: string; lat: number; lng: number }
   fulfillmentMethod: RequestFulfillmentMethod | null
   customerNotes: string | null
+  refCode: string | null
 }) {
   const supabase = await createClient()
 
@@ -35,6 +36,7 @@ export async function submitServiceRequestAction(payload: {
     p_location_lng: payload.location.lng,
     p_fulfillment_method: payload.fulfillmentMethod,
     p_customer_notes: payload.customerNotes,
+    p_ref_code: payload.refCode,
   })
 
   if (error) {

@@ -14,7 +14,7 @@ export default async function AffiliateCommissionsPage() {
 
   const { data: commissions, error } = await supabase
     .from('affiliate_commissions')
-    .select('id, order_id, referred_subtotal, referred_profit, commission_rate, commission_amount, status, created_at, businesses(name, slug)')
+    .select('id, order_id, request_id, referred_subtotal, referred_profit, commission_rate, commission_amount, status, created_at, businesses(name, slug)')
     .eq('affiliate_id', affiliate.id)
     .order('created_at', { ascending: false })
 
@@ -43,7 +43,8 @@ export default async function AffiliateCommissionsPage() {
             <TableHeader>
               <TableRow className="bg-gradient-brand-soft hover:bg-gradient-brand-soft">
                 <TableHead className="p-3">Shop</TableHead>
-                <TableHead className="p-3">Order</TableHead>
+                <TableHead className="p-3">Type</TableHead>
+                <TableHead className="p-3">Reference</TableHead>
                 <TableHead className="p-3 text-right">Referred Revenue</TableHead>
                 <TableHead className="p-3 text-right">Referred Profit</TableHead>
                 <TableHead className="p-3 text-right">Rate</TableHead>
@@ -55,13 +56,19 @@ export default async function AffiliateCommissionsPage() {
             <TableBody>
               {(commissions ?? []).map(c => {
                 const business = Array.isArray(c.businesses) ? c.businesses[0] : c.businesses
+                // Exactly one of these is set — order_id for a product sale,
+                // request_id for a completed service request (see
+                // affiliate_commissions_source_chk in database_schema.sql).
+                const isService = c.request_id != null
+                const referenceId = c.order_id ?? c.request_id
                 return (
                   <TableRow key={c.id}>
                     <TableCell className="p-3 font-medium text-foreground">{business?.name ?? '—'}</TableCell>
-                    <TableCell className="p-3 font-mono text-xs text-muted-foreground">#{c.order_id.slice(0, 8)}</TableCell>
+                    <TableCell className="p-3 text-xs text-muted-foreground">{isService ? 'Service' : 'Product'}</TableCell>
+                    <TableCell className="p-3 font-mono text-xs text-muted-foreground">#{referenceId?.slice(0, 8) ?? '—'}</TableCell>
                     <TableCell className="p-3 text-right font-mono">₱{Number(c.referred_subtotal).toFixed(2)}</TableCell>
                     <TableCell className="p-3 text-right font-mono">₱{Number(c.referred_profit).toFixed(2)}</TableCell>
-                    <TableCell className="p-3 text-right font-mono">{Number(c.commission_rate).toFixed(2)}%</TableCell>
+                    <TableCell className="p-3 text-right font-mono">{isService ? '— flat fee' : `${Number(c.commission_rate).toFixed(2)}%`}</TableCell>
                     <TableCell className="p-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">₱{Number(c.commission_amount).toFixed(2)}</TableCell>
                     <TableCell className="p-3"><CommissionStatusBadge status={c.status as AffiliateCommissionStatus} /></TableCell>
                     <TableCell className="p-3 text-xs text-muted-foreground">{new Date(c.created_at).toLocaleDateString()}</TableCell>

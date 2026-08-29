@@ -1383,6 +1383,17 @@ CREATE TABLE IF NOT EXISTS public.business_affiliate_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Flat peso payout per completed, affiliate-referred service_requests ticket
+-- (custom offerings — quotes, bookings, repairs — have no cost/profit
+-- figure the way a product does, so a percentage-of-profit rate like
+-- commission_rate above doesn't apply; the owner instead names a fixed fee).
+-- Independent of commission_rate: a hybrid shop can pay a % on products and
+-- a flat fee on services at the same time. 0 (the default) means "enrolled,
+-- but pays nothing on services" — see update_service_request()'s crediting
+-- step and affiliate_service_commission() below, both of which treat 0 the
+-- same as "not set".
+ALTER TABLE public.business_affiliate_settings ADD COLUMN IF NOT EXISTS service_commission_amount numeric(10,2) NOT NULL DEFAULT 0 CHECK (service_commission_amount >= 0);
+
 DROP TRIGGER IF EXISTS trg_business_affiliate_settings_updated_at ON public.business_affiliate_settings;
 CREATE TRIGGER trg_business_affiliate_settings_updated_at
   BEFORE UPDATE ON public.business_affiliate_settings
@@ -1423,9 +1434,10 @@ ALTER TABLE public.affiliate_payouts ADD COLUMN IF NOT EXISTS business_id uuid R
 CREATE INDEX IF NOT EXISTS affiliate_payouts_affiliate_id_idx ON public.affiliate_payouts(affiliate_id);
 CREATE INDEX IF NOT EXISTS affiliate_payouts_business_id_idx ON public.affiliate_payouts(business_id);
 
--- ---- affiliate_commissions (one row per referring affiliate per order, lifecycle tracked via `status`) ----
--- pending (order just placed) -> approved (order marked completed) or void
--- (order cancelled) -> paid (once its payout is marked paid).
+-- ---- affiliate_commissions (one row per referring affiliate per order OR service request, lifecycle tracked via `status`) ----
+-- pending (order just placed) -> approved (order marked completed, or a
+-- referred service request marked completed) or void (order cancelled) ->
+-- paid (once its payout is marked paid).
 -- `referred_subtotal` is the subtotal of just the items that carried this
 -- affiliate's code when they were added to the cart, not the whole order —
 -- see place_order() below. `commission_rate` is applied against
@@ -1433,10 +1445,18 @@ CREATE INDEX IF NOT EXISTS affiliate_payouts_business_id_idx ON public.affiliate
 -- cost — recipe cost or cost_price, same basis as Analytics), not against
 -- `referred_subtotal` — an affiliate earns a cut of what the business
 -- actually made on the sale, not a cut of gross revenue.
+-- Exactly one of order_id/request_id is set per row (see
+-- affiliate_commissions_source_chk below) — order_id for a product sale
+-- credited from place_order()/process_sale(), request_id for a service
+-- ticket credited from update_service_request() when it's marked completed.
+-- A service row has no profit concept (services carry no cost/recipe), so
+-- referred_profit is always 0 and commission_rate is always 0 for those —
+-- commission_amount there is business_affiliate_settings.service_commission_amount,
+-- a flat fee, not a rate applied to anything.
 CREATE TABLE IF NOT EXISTS public.affiliate_commissions (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
-  order_id uuid NOT NULL REFERENCES public.store_orders(id) ON DELETE CASCADE,
+  order_id uuid REFERENCES public.store_orders(id) ON DELETE CASCADE,
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
   referred_subtotal numeric(10,2) NOT NULL,
   referred_profit numeric(10,2) NOT NULL DEFAULT 0,
@@ -1445,9 +1465,20 @@ CREATE TABLE IF NOT EXISTS public.affiliate_commissions (
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'void', 'paid')),
   payout_id uuid REFERENCES public.affiliate_payouts(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (affiliate_id, order_id)
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- order_id predates request_id and was created NOT NULL — relax it so a
+-- service-request row (order_id IS NULL, request_id set instead) is legal.
+-- Additive/idempotent, same discipline as service_requests.customer_id above.
+-- request_id itself (and everything that depends on it) is added further
+-- down, in SECTION 14.3, once public.service_requests actually exists —
+-- this file runs top to bottom, and that table isn't created yet at this
+-- point in the script.
+ALTER TABLE public.affiliate_commissions ALTER COLUMN order_id DROP NOT NULL;
+-- The old table-level UNIQUE (affiliate_id, order_id) is replaced by a
+-- partial index below (see SECTION 14.3) so a service-request row (which
+-- will have order_id NULL) doesn't need to squeeze into it.
+ALTER TABLE public.affiliate_commissions DROP CONSTRAINT IF EXISTS affiliate_commissions_affiliate_id_order_id_key;
 -- Renamed from `order_subtotal`: CREATE TABLE IF NOT EXISTS is a no-op
 -- against a table an earlier run of this file already created, so the
 -- column rename above never reaches an existing database on its own —
@@ -1987,7 +2018,7 @@ BEGIN
 
       INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, commission_rate, commission_amount, status)
       VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_commission_rate, round(v_ref_item_subtotal * v_ref_commission_rate / 100, 2), 'pending')
-      ON CONFLICT (affiliate_id, order_id) DO NOTHING;
+      ON CONFLICT (affiliate_id, order_id) WHERE order_id IS NOT NULL DO NOTHING;
     END LOOP;
 
     v_order_ids := array_append(v_order_ids, v_order_id);
@@ -2629,7 +2660,7 @@ BEGIN
       -- against a different affiliate's positive one at payout time).
       INSERT INTO public.affiliate_commissions (affiliate_id, order_id, business_id, referred_subtotal, referred_profit, commission_rate, commission_amount, status)
       VALUES (v_ref_affiliate_id, v_order_id, v_business_id, v_ref_item_subtotal, v_ref_item_profit, v_ref_commission_rate, round(GREATEST(v_ref_item_profit, 0) * v_ref_commission_rate / 100, 2), 'pending')
-      ON CONFLICT (affiliate_id, order_id) DO NOTHING;
+      ON CONFLICT (affiliate_id, order_id) WHERE order_id IS NOT NULL DO NOTHING;
     END LOOP;
 
     v_order_ids := array_append(v_order_ids, v_order_id);
@@ -3015,12 +3046,85 @@ ALTER TABLE public.service_requests DROP CONSTRAINT IF EXISTS service_requests_i
 ALTER TABLE public.service_requests ADD CONSTRAINT service_requests_identity_chk
   CHECK (customer_id IS NOT NULL OR walk_in_name IS NOT NULL);
 
+-- The affiliate code (if any) present in the page's `?ref=` query string at
+-- the moment the customer submitted this request — stamped by
+-- submit_service_request() below, same idea as place_order()'s per-cart-item
+-- ref_code, just persisted here instead of living only for the duration of
+-- one RPC call, since a service request's completion (and so its commission
+-- credit — see update_service_request()) can happen days or weeks later.
+-- Never set by log_walkin_service_request(): a walk-in the owner logs in
+-- person didn't arrive via any affiliate's link.
+ALTER TABLE public.service_requests ADD COLUMN IF NOT EXISTS ref_code text;
+
 CREATE INDEX IF NOT EXISTS service_requests_business_id_idx ON public.service_requests(business_id, status);
 CREATE INDEX IF NOT EXISTS service_requests_customer_id_idx ON public.service_requests(customer_id);
 
 DROP TRIGGER IF EXISTS trg_service_requests_updated_at ON public.service_requests;
 CREATE TRIGGER trg_service_requests_updated_at BEFORE UPDATE ON public.service_requests
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ---- affiliate_commissions: wire up the service-request side, deferred from SECTION 10 ----
+-- (affiliate_commissions is created in SECTION 10, above public.service_requests
+-- in file order, so the request_id FK and everything built on it has to wait
+-- until this table actually exists.)
+ALTER TABLE public.affiliate_commissions ADD COLUMN IF NOT EXISTS request_id uuid REFERENCES public.service_requests(id) ON DELETE CASCADE;
+ALTER TABLE public.affiliate_commissions DROP CONSTRAINT IF EXISTS affiliate_commissions_source_chk;
+ALTER TABLE public.affiliate_commissions ADD CONSTRAINT affiliate_commissions_source_chk
+  CHECK ((order_id IS NOT NULL AND request_id IS NULL) OR (order_id IS NULL AND request_id IS NOT NULL));
+DROP INDEX IF EXISTS public.affiliate_commissions_affiliate_order_uidx;
+CREATE UNIQUE INDEX IF NOT EXISTS affiliate_commissions_affiliate_order_uidx ON public.affiliate_commissions(affiliate_id, order_id) WHERE order_id IS NOT NULL;
+DROP INDEX IF EXISTS public.affiliate_commissions_affiliate_request_uidx;
+CREATE UNIQUE INDEX IF NOT EXISTS affiliate_commissions_affiliate_request_uidx ON public.affiliate_commissions(affiliate_id, request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS affiliate_commissions_request_id_idx ON public.affiliate_commissions(request_id);
+
+-- Services counterpart to affiliate_product_commission() (SECTION 10) —
+-- what an approved affiliate would earn for referring a completed request
+-- against this offering, right now. Placed here rather than back in SECTION
+-- 10 because it needs public.offerings, which doesn't exist yet at that
+-- point in the file. Same NULL/0 contract as the product version: NULL
+-- means "don't show a figure" (not an affiliate, or the offering doesn't
+-- exist/isn't a request-based one), 0 means "shareable, but this shop
+-- either isn't enrolled or hasn't set a service commission amount."
+-- Unlike affiliate_product_commission(), this is a flat, pre-set fee, not a
+-- rate applied to any profit figure — see business_affiliate_settings.service_commission_amount.
+CREATE OR REPLACE FUNCTION public.affiliate_service_commission(p_offering_id bigint)
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_is_affiliate boolean;
+  v_business_id uuid;
+  v_amount numeric;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT EXISTS (SELECT 1 FROM public.affiliates a WHERE a.user_id = v_uid AND a.status = 'approved')
+    INTO v_is_affiliate;
+  IF NOT v_is_affiliate THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT o.business_id INTO v_business_id
+    FROM public.offerings o
+    WHERE o.id = p_offering_id AND o.is_active = true AND o.requires_pos = false;
+  IF v_business_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT service_commission_amount INTO v_amount
+    FROM public.business_affiliate_settings
+    WHERE business_id = v_business_id AND enabled = true;
+
+  RETURN COALESCE(v_amount, 0);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.affiliate_service_commission(bigint) TO authenticated;
 
 CREATE TABLE IF NOT EXISTS public.service_request_events (
   id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -3134,7 +3238,8 @@ CREATE OR REPLACE FUNCTION public.submit_service_request(
   p_location_lat numeric,
   p_location_lng numeric,
   p_fulfillment_method text DEFAULT NULL,
-  p_customer_notes text DEFAULT NULL
+  p_customer_notes text DEFAULT NULL,
+  p_ref_code text DEFAULT NULL
 )
 RETURNS public.service_requests
 LANGUAGE plpgsql
@@ -3196,11 +3301,11 @@ BEGIN
 
   INSERT INTO public.service_requests (
     business_id, offering_id, customer_id, fulfillment_type, form_data,
-    location_address, location_lat, location_lng, fulfillment_method, customer_notes
+    location_address, location_lat, location_lng, fulfillment_method, customer_notes, ref_code
   ) VALUES (
     v_offering.business_id, v_offering.id, v_uid, v_offering.fulfillment_type,
     COALESCE(p_form_data, '{}'::jsonb), trim(p_location_address), p_location_lat, p_location_lng,
-    p_fulfillment_method, p_customer_notes
+    p_fulfillment_method, p_customer_notes, NULLIF(lower(trim(COALESCE(p_ref_code, ''))), '')
   )
   RETURNING * INTO v_request;
 
@@ -3211,13 +3316,14 @@ BEGIN
 END;
 $$;
 
--- The old 4-arg signature (before a location was required) is dropped
--- explicitly rather than just CREATE OR REPLACE-d: an added required
--- parameter makes this a different overload as far as Postgres is concerned,
--- and this file needs to stay safe to re-run against a database that already
--- has the old version.
+-- The old 4-arg and 7-arg signatures (before a location was required, and
+-- before p_ref_code existed) are dropped explicitly rather than just CREATE
+-- OR REPLACE-d: an added parameter makes this a different overload as far as
+-- Postgres is concerned, and this file needs to stay safe to re-run against
+-- a database that already has an older version.
 DROP FUNCTION IF EXISTS public.submit_service_request(bigint, jsonb, text, text);
-GRANT EXECUTE ON FUNCTION public.submit_service_request(bigint, jsonb, text, numeric, numeric, text, text) TO authenticated;
+DROP FUNCTION IF EXISTS public.submit_service_request(bigint, jsonb, text, numeric, numeric, text, text);
+GRANT EXECUTE ON FUNCTION public.submit_service_request(bigint, jsonb, text, numeric, numeric, text, text, text) TO authenticated;
 
 -- A business owner logs a request on behalf of a walk-in customer who came
 -- into the shop in person and doesn't use the app — the admin-side
@@ -3320,6 +3426,10 @@ DECLARE
   v_uid uuid := auth.uid();
   v_request public.service_requests;
   v_is_owner boolean;
+  v_business_owner uuid;
+  v_ref_affiliate_id uuid;
+  v_ref_affiliate_user_id uuid;
+  v_service_commission numeric;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'Not authenticated';
@@ -3362,6 +3472,44 @@ BEGIN
     rejection_reason = CASE WHEN p_status = 'rejected' THEN p_rejection_reason ELSE rejection_reason END
   WHERE id = p_request_id
   RETURNING * INTO v_request;
+
+  -- Credit the referring affiliate (if any) exactly once, at the moment a
+  -- request is marked completed — mirrors place_order()'s commission insert,
+  -- just on a different trigger point since there's no "paid" order status
+  -- here to hang it on. Inserted straight as 'approved' (not 'pending' then
+  -- synced later, like the product flow) because 'completed' already IS the
+  -- terminal, work-is-done signal for a service request — there's no later
+  -- payment step left to wait on. ON CONFLICT makes this idempotent: calling
+  -- update_service_request(..., 'completed') again on an already-completed
+  -- request (a legal no-op per the transition table above, since p_status
+  -- would equal the current status) never double-credits.
+  IF p_status = 'completed' AND v_request.ref_code IS NOT NULL THEN
+    SELECT id, user_id INTO v_ref_affiliate_id, v_ref_affiliate_user_id
+      FROM public.affiliates WHERE code = v_request.ref_code AND status = 'approved';
+
+    IF v_ref_affiliate_id IS NOT NULL THEN
+      SELECT b.owner_id INTO v_business_owner FROM public.businesses b WHERE b.id = v_request.business_id;
+
+      -- Self-referral guard, same as place_order()'s v_ref_affiliate_user_id
+      -- IS NOT DISTINCT FROM v_ref_business_owner check.
+      IF v_ref_affiliate_user_id IS DISTINCT FROM v_business_owner THEN
+        SELECT service_commission_amount INTO v_service_commission
+          FROM public.business_affiliate_settings
+          WHERE business_id = v_request.business_id AND enabled = true;
+
+        IF v_service_commission IS NOT NULL AND v_service_commission > 0 THEN
+          INSERT INTO public.affiliate_commissions (
+            affiliate_id, request_id, business_id, referred_subtotal, referred_profit,
+            commission_rate, commission_amount, status
+          ) VALUES (
+            v_ref_affiliate_id, p_request_id, v_request.business_id, COALESCE(v_request.agreed_price, 0), 0,
+            0, v_service_commission, 'approved'
+          )
+          ON CONFLICT (affiliate_id, request_id) WHERE request_id IS NOT NULL DO NOTHING;
+        END IF;
+      END IF;
+    END IF;
+  END IF;
 
   IF p_status IS NOT NULL OR p_message IS NOT NULL OR p_quoted_price IS NOT NULL OR p_agreed_price IS NOT NULL THEN
     INSERT INTO public.service_request_events (request_id, actor_id, actor_role, event_type, message, metadata)

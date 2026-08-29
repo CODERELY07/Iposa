@@ -76,12 +76,19 @@ export async function updateBusinessLocationAction(payload: {
 // Upserts this business's affiliate-program settings (one row per business).
 // A plain owner-scoped RLS write, not an RPC — there's no cross-table
 // invariant to protect here, unlike register_business()/process_sale().
-export async function updateAffiliateSettingsAction(payload: { enabled: boolean; commission_rate: number }) {
+export async function updateAffiliateSettingsAction(payload: {
+  enabled: boolean
+  commission_rate: number
+  service_commission_amount: number
+}) {
   const business = await requireApprovedBusiness()
   const supabase = await createClient()
 
   if (!Number.isFinite(payload.commission_rate) || payload.commission_rate < 0 || payload.commission_rate > 100) {
     return { success: false as const, message: 'Commission rate must be between 0 and 100.' }
+  }
+  if (!Number.isFinite(payload.service_commission_amount) || payload.service_commission_amount < 0) {
+    return { success: false as const, message: 'Service commission amount must be 0 or greater.' }
   }
 
   const { error } = await supabase
@@ -90,6 +97,7 @@ export async function updateAffiliateSettingsAction(payload: { enabled: boolean;
       business_id: business.id,
       enabled: payload.enabled,
       commission_rate: payload.commission_rate,
+      service_commission_amount: payload.service_commission_amount,
     })
 
   if (error) {

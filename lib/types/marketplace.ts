@@ -192,6 +192,10 @@ export type BusinessAffiliateSettings = {
   business_id: string
   enabled: boolean
   commission_rate: number
+  // Flat peso payout per completed, affiliate-referred service_requests
+  // ticket — see database_schema.sql. Independent of commission_rate, which
+  // only applies to product/POS sales.
+  service_commission_amount: number
   updated_at: string
 }
 
@@ -200,7 +204,10 @@ export type AffiliateCommissionStatus = 'pending' | 'approved' | 'void' | 'paid'
 export type AffiliateCommission = {
   id: number
   affiliate_id: string
-  order_id: string
+  // Exactly one of order_id/request_id is set — a product-sale commission
+  // has order_id, a service-request commission has request_id instead.
+  order_id: string | null
+  request_id: string | null
   business_id: string
   // Subtotal of just the items that were added/bought through this
   // affiliate's link — not necessarily the whole order's total.
@@ -397,6 +404,10 @@ export type ServiceRequest = {
   customer_notes: string | null
   owner_notes: string | null
   rejection_reason: string | null
+  // The affiliate code (if any) present in the offering page's `?ref=` query
+  // string at submission — never set for a walk-in. See
+  // update_service_request()'s completion-time commission credit.
+  ref_code: string | null
   created_at: string
   updated_at: string
   offerings?: { name: string; metadata_schema: OfferingField[] } | null

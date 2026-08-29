@@ -14,6 +14,7 @@ import { AlertCircle, Loader2 } from 'lucide-react'
 export default function AffiliateSettingsForm({ settings }: { settings: BusinessAffiliateSettings | null }) {
   const [enabled, setEnabled] = useState(settings?.enabled ?? false)
   const [rate, setRate] = useState(String(settings?.commission_rate ?? 5))
+  const [serviceAmount, setServiceAmount] = useState(String(settings?.service_commission_amount ?? 0))
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -21,7 +22,11 @@ export default function AffiliateSettingsForm({ settings }: { settings: Business
     e.preventDefault()
     setError(null)
     startTransition(async () => {
-      const result = await updateAffiliateSettingsAction({ enabled, commission_rate: Number(rate) })
+      const result = await updateAffiliateSettingsAction({
+        enabled,
+        commission_rate: Number(rate),
+        service_commission_amount: Number(serviceAmount),
+      })
       if (result.success) {
         toast.success('Affiliate settings saved.')
       } else {
@@ -45,7 +50,7 @@ export default function AffiliateSettingsForm({ settings }: { settings: Business
       </Label>
 
       <div className="space-y-1.5">
-        <Label htmlFor="commission_rate">Commission rate (%)</Label>
+        <Label htmlFor="commission_rate">Product commission rate (%)</Label>
         <Input
           id="commission_rate"
           type="number"
@@ -59,7 +64,27 @@ export default function AffiliateSettingsForm({ settings }: { settings: Business
         />
         <p className="text-[11px] text-muted-foreground">
           Paid to an affiliate out of your profit (selling price minus item cost), not your revenue — e.g. a ₱29
-          item with ₱15 profit and a 10% rate pays the affiliate ₱1.50, not ₱2.90.
+          item with ₱15 profit and a 10% rate pays the affiliate ₱1.50, not ₱2.90. Applies to products bought
+          through the cart.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="service_commission_amount">Service request commission (fixed ₱ amount)</Label>
+        <Input
+          id="service_commission_amount"
+          type="number"
+          min={0}
+          step="1"
+          value={serviceAmount}
+          onChange={e => setServiceAmount(e.target.value)}
+          disabled={!enabled}
+          className="w-32"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          A flat peso amount, not a percentage — custom offerings (quotes, bookings, repairs) have no per-item cost
+          to take a cut of, so you name a fixed price instead. Paid once, when you mark a request an affiliate
+          referred as completed. ₱0 means shareable but pays nothing.
         </p>
       </div>
 

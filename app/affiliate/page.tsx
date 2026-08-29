@@ -3,7 +3,7 @@ import LinkGenerator from '@/components/affiliate/LinkGenerator'
 import { Card } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Clock, XCircle, MousePointerClick, Receipt, Wallet, Landmark, Link2 } from 'lucide-react'
-import type { MarketplaceProduct } from '@/lib/types/marketplace'
+import type { MarketplaceProduct, MarketplaceOffering } from '@/lib/types/marketplace'
 
 export const revalidate = 0
 
@@ -55,7 +55,7 @@ export default async function AffiliateDashboardPage() {
   ] = await Promise.all([
     supabase.from('affiliate_clicks').select('*', { count: 'exact', head: true }).eq('affiliate_id', affiliate.id),
     supabase.from('affiliate_commissions').select('status, commission_amount').eq('affiliate_id', affiliate.id),
-    supabase.from('business_affiliate_settings').select('business_id').eq('enabled', true),
+    supabase.from('business_affiliate_settings').select('business_id, commission_rate, service_commission_amount').eq('enabled', true),
   ])
 
   if (commissionsErr) {
@@ -66,7 +66,15 @@ export default async function AffiliateDashboardPage() {
     )
   }
 
-  const enabledBusinessIds = (enabledBusinessRows ?? []).map(r => r.business_id)
+  const enabledSettings = enabledBusinessRows ?? []
+  const enabledBusinessIds = enabledSettings.map(r => r.business_id)
+  // A shop with a product commission rate still lists here even if its rate
+  // is 0 (ShareProductButton/the product page compute the real per-unit
+  // payout); a shop only worth listing for *services* needs a positive flat
+  // fee, since 0 means "enrolled, but pays nothing on services" — see
+  // business_affiliate_settings.service_commission_amount.
+  const serviceEligibleBusinessIds = enabledSettings.filter(r => Number(r.service_commission_amount) > 0).map(r => r.business_id)
+
   let shareableProducts: MarketplaceProduct[] = []
   if (enabledBusinessIds.length > 0) {
     const { data } = await supabase
@@ -76,6 +84,18 @@ export default async function AffiliateDashboardPage() {
       .order('created_at', { ascending: false })
       .limit(12)
     shareableProducts = (data as MarketplaceProduct[]) ?? []
+  }
+
+  let shareableOfferings: MarketplaceOffering[] = []
+  if (serviceEligibleBusinessIds.length > 0) {
+    const { data } = await supabase
+      .from('marketplace_offerings')
+      .select('*')
+      .in('business_id', serviceEligibleBusinessIds)
+      .eq('requires_pos', false)
+      .order('created_at', { ascending: false })
+      .limit(12)
+    shareableOfferings = (data as MarketplaceOffering[]) ?? []
   }
 
   const rows = commissions ?? []
@@ -90,6 +110,11 @@ export default async function AffiliateDashboardPage() {
   const links = shareableProducts.map(p => ({
     label: `${p.name} — ${p.business_name}`,
     path: `/shop/${p.business_slug}/${p.slug}`,
+  }))
+
+  const serviceLinks = shareableOfferings.map(o => ({
+    label: `${o.name} — ${o.business_name}`,
+    path: `/shop/${o.business_slug}/service/${o.slug}`,
   }))
 
   return (
@@ -153,6 +178,22 @@ export default async function AffiliateDashboardPage() {
           <p className="text-xs text-muted-foreground">No shops have enabled the affiliate program yet — check back soon.</p>
         ) : (
           <LinkGenerator code={affiliate.code} links={links} />
+        )}
+      </Card>
+
+      <Card className="p-5">
+        <h4 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          <Link2 className="size-4 text-primary" /> Share a service, earn a fixed commission
+        </h4>
+        <p className="mb-3 text-[11px] text-muted-foreground">
+          Custom offerings (quotes, bookings, repairs) pay a flat fee instead of a percentage — you&apos;re credited
+          once the shop marks a request you referred as completed. Here are the newest ones from shops paying a
+          service commission above ₱0:
+        </p>
+        {serviceLinks.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No shops are currently paying a service commission — check back soon.</p>
+        ) : (
+          <LinkGenerator code={affiliate.code} links={serviceLinks} />
         )}
       </Card>
     </div>
