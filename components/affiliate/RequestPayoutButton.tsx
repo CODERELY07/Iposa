@@ -13,7 +13,7 @@ export default function RequestPayoutButton({ disabled }: { disabled: boolean })
     startTransition(async () => {
       const result = await requestPayoutAction()
       if (result.success) {
-        toast.success('Payout requested — the marketplace team will process it soon.')
+        toast.success('Payout requested — each shop will pay you in cash in person once they mark it paid.')
       } else {
         toast.error(result.message)
       }

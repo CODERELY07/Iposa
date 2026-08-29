@@ -222,12 +222,18 @@ export type AffiliatePayoutStatus = 'requested' | 'paid' | 'rejected'
 export type AffiliatePayout = {
   id: string
   affiliate_id: string
+  // Which shop's cash this payout is owed from — see database_schema.sql
+  // (affiliate_payouts): every sale here is cash, so a payout is always
+  // scoped to one business, never lumped across every shop an affiliate
+  // referred sales to. Nullable only for a pre-split row predating that.
+  business_id: string | null
   amount: number
   status: AffiliatePayoutStatus
   requested_at: string
   paid_at: string | null
   notes: string | null
-  affiliates?: { full_name: string; code: string } | null
+  affiliates?: { full_name: string; code: string; payout_details?: string | null } | null
+  businesses?: { name: string; slug: string } | null
 }
 
 export type CartItem = {

@@ -16,7 +16,7 @@ export default async function AffiliatePayoutsPage() {
   const [{ data: payoutRows, error: payoutsErr }, { data: payableRows, error: payableErr }] = await Promise.all([
     supabase
       .from('affiliate_payouts')
-      .select('id, amount, status, requested_at, paid_at')
+      .select('id, amount, status, requested_at, paid_at, businesses(name, slug)')
       .eq('affiliate_id', affiliate.id)
       .order('requested_at', { ascending: false }),
     supabase
@@ -35,7 +35,10 @@ export default async function AffiliatePayoutsPage() {
     <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
       <div>
         <h1 className="font-serif text-2xl font-normal tracking-tight text-foreground">Payouts</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">Cash out your payable balance to your registered payout method.</p>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Every sale here is cash, so every commission is paid the same way — in person, by the shop whose sale you
+          referred. Requesting a payout splits your balance into one request per shop; each pays their own.
+        </p>
       </div>
 
       {error && (
@@ -54,7 +57,7 @@ export default async function AffiliatePayoutsPage() {
             <span className="text-xs font-semibold font-mono uppercase tracking-wider text-muted-foreground">Available to request</span>
             <h3 className="mt-1 font-mono text-2xl font-bold text-emerald-600 dark:text-emerald-400">{peso(payableBalance)}</h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Paid via {affiliate.payout_method ?? 'your registered method'}{affiliate.payout_details ? ` — ${affiliate.payout_details}` : ''}
+              Paid in cash, in person{affiliate.payout_details ? ` — reachable at ${affiliate.payout_details}` : ''}
             </p>
           </div>
         </div>
@@ -73,6 +76,7 @@ export default async function AffiliatePayoutsPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-gradient-brand-soft hover:bg-gradient-brand-soft">
+                <TableHead className="p-3">Shop</TableHead>
                 <TableHead className="p-3">Requested</TableHead>
                 <TableHead className="p-3 text-right">Amount</TableHead>
                 <TableHead className="p-3">Status</TableHead>
@@ -80,14 +84,18 @@ export default async function AffiliatePayoutsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(payoutRows ?? []).map(p => (
-                <TableRow key={p.id}>
-                  <TableCell className="p-3 text-xs text-muted-foreground">{new Date(p.requested_at).toLocaleString()}</TableCell>
-                  <TableCell className="p-3 text-right font-mono font-semibold text-foreground">{peso(Number(p.amount))}</TableCell>
-                  <TableCell className="p-3"><PayoutStatusBadge status={p.status as AffiliatePayoutStatus} /></TableCell>
-                  <TableCell className="p-3 text-xs text-muted-foreground">{p.paid_at ? new Date(p.paid_at).toLocaleString() : '—'}</TableCell>
-                </TableRow>
-              ))}
+              {(payoutRows ?? []).map(p => {
+                const business = Array.isArray(p.businesses) ? p.businesses[0] : p.businesses
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell className="p-3 font-medium text-foreground">{business?.name ?? '—'}</TableCell>
+                    <TableCell className="p-3 text-xs text-muted-foreground">{new Date(p.requested_at).toLocaleString()}</TableCell>
+                    <TableCell className="p-3 text-right font-mono font-semibold text-foreground">{peso(Number(p.amount))}</TableCell>
+                    <TableCell className="p-3"><PayoutStatusBadge status={p.status as AffiliatePayoutStatus} /></TableCell>
+                    <TableCell className="p-3 text-xs text-muted-foreground">{p.paid_at ? new Date(p.paid_at).toLocaleString() : '—'}</TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </Card>

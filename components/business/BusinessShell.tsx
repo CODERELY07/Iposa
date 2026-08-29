@@ -19,6 +19,7 @@ import {
   ScrollText,
   LineChart,
   Wallet,
+  Landmark,
   Settings,
   KeyRound,
   LogOut,
@@ -69,6 +70,10 @@ function getNavSections(business: Business): { section: string; items: NavItem[]
         { href: '/sell/sales-history', label: 'POS Sales History', icon: ScrollText, color: 'teal' },
         { href: '/sell/analytics', label: 'Analytics', icon: LineChart, color: 'fuchsia' },
         { href: '/sell/expenses', label: 'Expenses', icon: Wallet, color: 'amber' },
+        // Every sale is cash, so an affiliate commission is cash this shop
+        // itself owes and hands over in person — never a platform payout —
+        // hence this lives in the shop's own nav, not just an admin page.
+        { href: '/sell/affiliate-payouts', label: 'Affiliate Payouts', icon: Landmark, color: 'slate' },
       ],
     },
   ]

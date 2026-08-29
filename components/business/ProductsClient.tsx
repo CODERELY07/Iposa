@@ -152,18 +152,25 @@ export default function ProductsClient({ initialProducts, categories, ingredient
     }
   }
 
+  // Shared by the + button and the auto-include-on-save below, so both stay
+  // in sync with the same "already in the list? bump its qty instead of
+  // duplicating" rule.
+  function mergeRecipeItem(base: RecipeItem[], ingId: number, qty: number) {
+    const existing = base.find(item => item.ingredient_id === ingId)
+    if (existing) {
+      return base.map(item => item.ingredient_id === ingId ? { ...item, quantity_used: qty } : item)
+    }
+    return [...base, { ingredient_id: ingId, quantity_used: qty }]
+  }
+
   function addIngredientToRecipe() {
     if (!selectedIngredientId || !quantityUsed || parseFloat(quantityUsed) <= 0) return
-    const ingId = Number(selectedIngredientId)
-    const qty = parseFloat(quantityUsed)
+    setRecipeItems(prev => mergeRecipeItem(prev, Number(selectedIngredientId), parseFloat(quantityUsed)))
+    setSelectedIngredientId('')
+    setQuantityUsed('')
+  }
 
-    setRecipeItems(prev => {
-      const existing = prev.find(item => item.ingredient_id === ingId)
-      if (existing) {
-        return prev.map(item => item.ingredient_id === ingId ? { ...item, quantity_used: qty } : item)
-      }
-      return [...prev, { ingredient_id: ingId, quantity_used: qty }]
-    })
+  function clearPendingIngredient() {
     setSelectedIngredientId('')
     setQuantityUsed('')
   }
@@ -176,7 +183,16 @@ export default function ProductsClient({ initialProducts, categories, ingredient
     e.preventDefault()
     setError(null)
 
-    const hasIngredients = recipeItems.length > 0
+    // A picked ingredient + quantity sitting in the row above the list still
+    // counts, even if the user saves without clicking + first — that's the
+    // easy-to-miss step this quietly protects against, rather than silently
+    // dropping whatever they'd just picked.
+    const finalRecipeItems =
+      selectedIngredientId && quantityUsed && parseFloat(quantityUsed) > 0
+        ? mergeRecipeItem(recipeItems, Number(selectedIngredientId), parseFloat(quantityUsed))
+        : recipeItems
+
+    const hasIngredients = finalRecipeItems.length > 0
     const calculatedCost = hasIngredients ? 0 : parseFloat(form.cost_price || '0')
     // If ingredients exist, hardcode base stock storage to 0 because availability is determined dynamically
     const finalStockValue = hasIngredients ? 0 : parseInt(form.stock, 10)
@@ -196,7 +212,7 @@ export default function ProductsClient({ initialProducts, categories, ingredient
 
     startTransition(async () => {
       try {
-        await onSaveAction(payload, recipeItems)
+        await onSaveAction(payload, finalRecipeItems)
         closeModal()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to save product.')
@@ -483,7 +499,10 @@ export default function ProductsClient({ initialProducts, categories, ingredient
             {meta.showRecipeSection && (
             <div className="border-t pt-4">
               <h3 className="mb-1 text-xs font-bold font-mono uppercase tracking-wider text-foreground">{meta.recipeLabel} Construction</h3>
-              <p className="mb-3 text-[10px] text-muted-foreground">Adding {meta.materialLabelSingular}s locks manual stock and computes available units from your {meta.materialLabel.toLowerCase()} inventory.</p>
+              <p className="mb-3 text-[10px] text-muted-foreground">
+                Adding {meta.materialLabelSingular}s locks manual stock and computes available units from your {meta.materialLabel.toLowerCase()} inventory.
+                A picked {meta.materialLabelSingular} still gets added when you save, even if you forget to tap +.
+              </p>
 
               <div className="mb-3 flex flex-col gap-2 rounded-lg border bg-muted/40 p-2 sm:flex-row sm:items-end">
                 <div className="flex-1 space-y-1">
@@ -505,6 +524,18 @@ export default function ProductsClient({ initialProducts, categories, ingredient
                     <Input type="number" step="0.01" placeholder="Amt" value={quantityUsed} onChange={e => setQuantityUsed(e.target.value)} className="bg-background font-mono" />
                   </div>
                   <Button type="button" size="icon" onClick={addIngredientToRecipe} className="shrink-0"><Plus /></Button>
+                  {(selectedIngredientId || quantityUsed) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={clearPendingIngredient}
+                      className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={`Clear picked ${meta.materialLabelSingular}`}
+                    >
+                      <X />
+                    </Button>
+                  )}
                 </div>
               </div>
 

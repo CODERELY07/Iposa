@@ -12,7 +12,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { OrderStatusBadge, FulfillmentBadge } from '@/components/marketplace/StatusBadge'
-import { AlertCircle, PackageX, Clock3, ShieldAlert, CheckCircle2, MapPinned, Ban, Loader2 } from 'lucide-react'
+import DeliveryNavigateButton from '@/components/marketplace/DeliveryNavigateButton'
+import { AlertCircle, PackageX, Clock3, ShieldAlert, CheckCircle2, Ban, Loader2 } from 'lucide-react'
 
 type OrderRow = {
   id: string
@@ -252,14 +253,14 @@ export default function StoreOrdersClient({
                 <>
                   <p className="text-sm text-foreground">{order.shipping_address}</p>
                   {order.shipping_lat != null && order.shipping_lng != null && (
-                    <a
-                      href={`https://www.openstreetmap.org/?mlat=${order.shipping_lat}&mlon=${order.shipping_lng}#map=17/${order.shipping_lat}/${order.shipping_lng}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <MapPinned className="size-3" /> View pinned location
-                    </a>
+                    <DeliveryNavigateButton
+                      lat={order.shipping_lat}
+                      lng={order.shipping_lng}
+                      customerLabel={order.shipping_name ?? 'Customer'}
+                      address={order.shipping_address}
+                      label="Navigate there"
+                      className="mt-1 text-xs"
+                    />
                   )}
                 </>
               )}

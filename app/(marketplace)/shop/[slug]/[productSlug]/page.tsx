@@ -33,22 +33,48 @@ export default async function ProductDetailPage({
     notFound()
   }
 
-  // Only an approved affiliate gets a code-tagged share link — everyone else
-  // just shares the plain product URL.
+  // Only an approved affiliate gets a code-tagged share link, and only when
+  // this product's own shop has actually turned commissions on — place_order()
+  // silently skips creating a commission row for a business with no enabled
+  // business_affiliate_settings row (see database_schema.sql), so handing out
+  // a tagged link for one would earn nothing no matter how many sales it
+  // drives, with no error or feedback anywhere. Everyone else (and every
+  // product from a shop that hasn't opted in) just shares the plain URL.
+  //
+  // affiliateCommission answers the "is this even worth sharing?" question
+  // up front, in pesos, instead of making the affiliate infer it from a
+  // yes/no toggle: null means "not applicable" (not an affiliate, or this
+  // page's own product lookup failed some check), 0 means "shareable, but
+  // this shop isn't enrolled in the affiliate program so it pays nothing",
+  // and a positive number is the real per-unit payout — computed server-side
+  // by affiliate_product_commission() since the profit math needs
+  // recipes/ingredients/cost_price, none of which this page (or an
+  // affiliate) has direct row access to.
   let affiliateCode: string | null = null
+  let affiliateCommission: number | null = null
   const role = await getCurrentUserRole()
   if (role === 'affiliate') {
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (user) {
-      const { data: affiliate } = await supabase
-        .from('affiliates')
-        .select('code')
-        .eq('user_id', user.id)
-        .eq('status', 'approved')
-        .maybeSingle()
-      affiliateCode = affiliate?.code ?? null
+      const [{ data: affiliate }, { data: affiliateSettings }, { data: commissionValue }] = await Promise.all([
+        supabase
+          .from('affiliates')
+          .select('code')
+          .eq('user_id', user.id)
+          .eq('status', 'approved')
+          .maybeSingle(),
+        supabase
+          .from('business_affiliate_settings')
+          .select('enabled')
+          .eq('business_id', product.business_id)
+          .eq('enabled', true)
+          .maybeSingle(),
+        supabase.rpc('affiliate_product_commission', { p_product_id: product.id }),
+      ])
+      affiliateCode = affiliateSettings ? (affiliate?.code ?? null) : null
+      affiliateCommission = commissionValue === null ? null : Number(commissionValue)
     }
   }
 
@@ -93,6 +119,21 @@ export default async function ProductDetailPage({
           <span className="text-2xl font-bold tracking-tight text-foreground">
             ₱{Number(product.price).toFixed(2)}
           </span>
+
+          {affiliateCommission !== null && (
+            <Badge
+              variant="outline"
+              className={
+                affiliateCommission > 0
+                  ? 'w-fit border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400'
+                  : 'w-fit text-muted-foreground'
+              }
+            >
+              {affiliateCommission > 0
+                ? `You'll earn ₱${affiliateCommission.toFixed(2)} per sale`
+                : "This shop isn't enrolled in the affiliate program — ₱0.00"}
+            </Badge>
+          )}
 
           <Separator />
 

@@ -33,26 +33,30 @@ export default function PayoutReviewClient({ payouts }: { payouts: AffiliatePayo
         </div>
       )}
 
-      {payouts.map(p => (
-        <Card key={p.id} className="flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-sm font-bold text-foreground">{p.affiliates?.full_name ?? 'Affiliate'}</h3>
-            <Badge variant="outline" className="mt-1 font-mono">{p.affiliates?.code}</Badge>
-            <p className="mt-2 font-mono text-sm font-semibold text-foreground">
-              ₱{Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Requested {new Date(p.requested_at).toLocaleString()}</p>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'paid')}>
-              Mark paid
-            </Button>
-            <Button size="sm" variant="destructive" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'rejected')}>
-              Reject
-            </Button>
-          </div>
-        </Card>
-      ))}
+      {payouts.map(p => {
+        const business = Array.isArray(p.businesses) ? p.businesses[0] : p.businesses
+        return (
+          <Card key={p.id} className="flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-foreground">{p.affiliates?.full_name ?? 'Affiliate'}</h3>
+              <Badge variant="outline" className="mt-1 font-mono">{p.affiliates?.code}</Badge>
+              <p className="mt-2 font-mono text-sm font-semibold text-foreground">
+                ₱{Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">Owed by {business?.name ?? 'an unknown shop'}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Requested {new Date(p.requested_at).toLocaleString()}</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'paid')}>
+                Mark paid
+              </Button>
+              <Button size="sm" variant="destructive" disabled={isPending && busyId === p.id} onClick={() => review(p.id, 'rejected')}>
+                Reject
+              </Button>
+            </div>
+          </Card>
+        )
+      })}
     </div>
   )
 }

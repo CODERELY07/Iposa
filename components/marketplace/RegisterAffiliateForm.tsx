@@ -5,14 +5,8 @@ import { registerAffiliateAction } from '@/app/(auth)/(route group)/become-affil
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, Loader2 } from 'lucide-react'
-
-// Plain native <select> (not the shadcn Select) so its value keeps reading
-// straight out of FormData in the server action — styled to match anyway.
-const selectClass =
-  'h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
+import { AlertCircle, Banknote, Loader2 } from 'lucide-react'
 
 export default function RegisterAffiliateForm() {
   const [isPending, startTransition] = useTransition()
@@ -46,18 +40,23 @@ export default function RegisterAffiliateForm() {
         <Input id="full_name" name="full_name" required placeholder="e.g., Juan Dela Cruz" />
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="payout_method">Payout method</Label>
-        <select id="payout_method" name="payout_method" className={selectClass}>
-          <option value="GCash">GCash</option>
-          <option value="Bank Transfer">Bank Transfer</option>
-          <option value="PayMaya">PayMaya</option>
-        </select>
-      </div>
+      {/* There's no payment gateway behind this platform — every sale is
+          cash, so every commission is cash too, paid to you in person by
+          whichever shop's sale you referred (see the Payouts page once
+          you're approved). A phone number is all a shop needs to arrange
+          the handoff — there's no GCash/bank routing to collect, since
+          nothing here is ever transferred electronically. */}
+      <Alert className="border-primary/20 bg-primary/5">
+        <Banknote className="text-primary" />
+        <AlertDescription className="text-foreground">
+          Commissions are paid in <strong>cash, in person</strong>, directly by the shop whose sale you referred —
+          there&apos;s no bank or e-wallet transfer. Just leave a number they can reach you on.
+        </AlertDescription>
+      </Alert>
 
       <div className="space-y-1.5">
-        <Label htmlFor="payout_details">Payout details</Label>
-        <Textarea id="payout_details" name="payout_details" rows={2} placeholder="Account name and number" />
+        <Label htmlFor="payout_details">Contact phone number</Label>
+        <Input id="payout_details" name="payout_details" type="tel" placeholder="e.g., 0917 123 4567" />
       </div>
 
       <Button type="submit" size="lg" disabled={isPending} className="mt-2 w-full">

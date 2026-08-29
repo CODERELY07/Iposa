@@ -541,10 +541,35 @@ CREATE TABLE IF NOT EXISTS public.store_order_items (
 CREATE INDEX IF NOT EXISTS store_order_items_order_id_idx ON public.store_order_items(order_id);
 
 -- ---- public read view for the marketplace feed ----
-DROP VIEW IF EXISTS public.marketplace_products;
-
-CREATE VIEW public.marketplace_products
-WITH (security_invoker = true) AS
+-- CREATE OR REPLACE (not DROP + CREATE) so re-running this block against an
+-- already-deployed database is enough to push a logic change live — no
+-- manual DROP step, no risk of leaving the view missing if something after
+-- the DROP fails. This matters in practice: this project has no migration
+-- runner, so `database_schema.sql` only ever takes effect on Supabase when
+-- someone pastes it into the SQL editor and runs it by hand.
+--
+-- Deliberately NOT security_invoker — `ingredients` and `recipes` are
+-- locked down to their owning business only (see "ingredients_owner_all" /
+-- "recipes_owner_all" below: USING (... b.owner_id = auth.uid() ...)), so a
+-- shopper has zero row-level access to either table. Under
+-- security_invoker, the recipe_stock LATERAL join below would run with the
+-- *querying shopper's* RLS permissions, see zero ingredient/recipe rows,
+-- and always compute recipe_stock.available = NULL — silently falling back
+-- to sp.stock, which is hardcoded to 0 for any recipe-based dish (see the
+-- comment on the `stock` column below). That reads as every restaurant
+-- dish being permanently out of stock to every customer, no matter how
+-- well-stocked its ingredients actually are, while the owner's own admin
+-- session (which does have RLS access to its own ingredients/recipes)
+-- shows the correct count — exactly the split symptom this view exists to
+-- avoid. Running the view as its owner (the default — no security_invoker)
+-- is the standard, safe pattern for exposing a computed aggregate through a
+-- view over RLS-protected tables: the SELECT list below never surfaces raw
+-- ingredient names, costs, or recipe rows, only the final integer. Set
+-- explicitly to false (not just omitted) since CREATE OR REPLACE VIEW isn't
+-- guaranteed to reset an option a previously-deployed view already had set
+-- to true — re-running this block must actually flip it, not leave it stuck.
+CREATE OR REPLACE VIEW public.marketplace_products
+WITH (security_invoker = false) AS
 SELECT
   sp.id,
   sp.name,
@@ -1373,6 +1398,18 @@ CREATE TABLE IF NOT EXISTS public.affiliate_clicks (
 CREATE INDEX IF NOT EXISTS affiliate_clicks_affiliate_id_idx ON public.affiliate_clicks(affiliate_id);
 
 -- ---- affiliate_payouts (created before affiliate_commissions, which references it) ----
+-- This app has no payment gateway and never has (see platform_fee_rate()
+-- above) — every sale is cash, so the cash for a commission only ever sits
+-- with the business whose sale earned it. A payout is therefore scoped to
+-- ONE business, not lumped across every shop an affiliate has referred
+-- sales to: request_affiliate_payout() below splits an affiliate's payable
+-- balance into one payout row per business, and it's that business's own
+-- owner — not a platform admin holding no one's cash — who marks it paid
+-- once they've actually handed the cash over (see
+-- set_affiliate_payout_status()). business_id is nullable only so this
+-- ALTER stays additive against any payout rows a pre-split install already
+-- has on disk; every row request_affiliate_payout() creates from here on
+-- always sets it.
 CREATE TABLE IF NOT EXISTS public.affiliate_payouts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   affiliate_id uuid NOT NULL REFERENCES public.affiliates(id) ON DELETE CASCADE,
@@ -1382,7 +1419,9 @@ CREATE TABLE IF NOT EXISTS public.affiliate_payouts (
   paid_at timestamptz,
   notes text
 );
+ALTER TABLE public.affiliate_payouts ADD COLUMN IF NOT EXISTS business_id uuid REFERENCES public.businesses(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS affiliate_payouts_affiliate_id_idx ON public.affiliate_payouts(affiliate_id);
+CREATE INDEX IF NOT EXISTS affiliate_payouts_business_id_idx ON public.affiliate_payouts(business_id);
 
 -- ---- affiliate_commissions (one row per referring affiliate per order, lifecycle tracked via `status`) ----
 -- pending (order just placed) -> approved (order marked completed) or void
@@ -1567,11 +1606,92 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.track_affiliate_referral_click(text, text) TO anon, authenticated;
 
--- An approved affiliate cashes out their payable balance. Sums every
--- 'approved' commission not yet attached to a payout, and stamps them all
--- with the new payout's id so they can't be requested twice.
+-- What an approved affiliate would earn on ONE unit of a given product,
+-- right now — powers the "you'll earn ₱X" figure on the storefront product
+-- page. SECURITY DEFINER because computing real profit needs `recipes` /
+-- `ingredients` (owner-only RLS — see ingredients_owner_all /
+-- recipes_owner_all above) and `store_products.cost_price`, none of which
+-- an affiliate has row access to directly; this returns only the final
+-- peso figure, never the underlying cost or recipe breakdown, so it can't
+-- be used to back into a shop's margins.
+-- Same profit basis as place_order()'s commission insert (recipe cost,
+-- falling back to cost_price for a non-recipe product), same self-referral
+-- guard is irrelevant here (this is a "what if" preview, not a real
+-- credit), and the same GREATEST(profit, 0) floor — a below-cost item
+-- shows ₱0.00, never a negative "earning".
+-- Returns NULL (not 0) for a caller who isn't an approved affiliate, or
+-- for a product that doesn't exist/isn't active — the storefront treats
+-- NULL as "don't show this at all", distinct from a real ₱0.00 meaning
+-- "you can share this, but this shop doesn't pay a commission on it".
+CREATE OR REPLACE FUNCTION public.affiliate_product_commission(p_product_id bigint)
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_is_affiliate boolean;
+  v_business_id uuid;
+  v_price numeric;
+  v_cost_price numeric;
+  v_recipe_cost numeric;
+  v_commission_rate numeric;
+  v_profit numeric;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT EXISTS (SELECT 1 FROM public.affiliates a WHERE a.user_id = v_uid AND a.status = 'approved')
+    INTO v_is_affiliate;
+  IF NOT v_is_affiliate THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT p.business_id, p.price, p.cost_price
+    INTO v_business_id, v_price, v_cost_price
+    FROM public.store_products p
+    WHERE p.id = p_product_id AND p.is_active = true;
+  IF v_business_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  -- Not enrolled in the affiliate program at all: shareable, but pays ₱0 —
+  -- distinct from the NULL cases above, which mean "don't show a figure".
+  SELECT commission_rate INTO v_commission_rate
+    FROM public.business_affiliate_settings
+    WHERE business_id = v_business_id AND enabled = true;
+  IF v_commission_rate IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  SELECT SUM(r.quantity_used * i.cost_per_unit) INTO v_recipe_cost
+    FROM public.recipes r JOIN public.ingredients i ON i.id = r.ingredient_id
+    WHERE r.product_id = p_product_id;
+
+  v_profit := v_price - COALESCE(v_recipe_cost, v_cost_price);
+
+  RETURN round(GREATEST(v_profit, 0) * v_commission_rate / 100, 2);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.affiliate_product_commission(bigint) TO authenticated;
+
+-- An approved affiliate cashes out their payable balance. Every sale here
+-- is cash (see affiliate_payouts above) — there's no pooled platform float
+-- to pay OUT of, only whatever cash each referring business took in — so
+-- this groups every 'approved', not-yet-paid-out commission BY business
+-- and creates one payout row per business, not one lump sum. An affiliate
+-- who referred sales to three shops gets three payout rows back from one
+-- click, each collectible in person from that shop.
+-- DROP first: this used to RETURN a single row before the per-business
+-- split above, and Postgres refuses to CREATE OR REPLACE a function into a
+-- different return type (SETOF vs. a bare row) — only a straight DROP lets
+-- a database still on that earlier version pick up this change.
+DROP FUNCTION IF EXISTS public.request_affiliate_payout();
 CREATE OR REPLACE FUNCTION public.request_affiliate_payout()
-RETURNS public.affiliate_payouts
+RETURNS SETOF public.affiliate_payouts
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
@@ -1579,8 +1699,10 @@ AS $$
 DECLARE
   v_uid uuid := auth.uid();
   v_affiliate_id uuid;
+  v_business_id uuid;
   v_amount numeric(10,2);
   v_payout public.affiliate_payouts;
+  v_any boolean := false;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'Not authenticated';
@@ -1595,31 +1717,42 @@ BEGIN
     WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL
     FOR UPDATE;
 
-  SELECT COALESCE(SUM(commission_amount), 0) INTO v_amount
+  FOR v_business_id, v_amount IN
+    SELECT business_id, SUM(commission_amount)
     FROM public.affiliate_commissions
-    WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL;
+    WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL
+    GROUP BY business_id
+  LOOP
+    CONTINUE WHEN v_amount <= 0;
+    v_any := true;
 
-  IF v_amount <= 0 THEN
+    INSERT INTO public.affiliate_payouts (affiliate_id, business_id, amount, status)
+    VALUES (v_affiliate_id, v_business_id, v_amount, 'requested')
+    RETURNING * INTO v_payout;
+
+    UPDATE public.affiliate_commissions
+    SET payout_id = v_payout.id
+    WHERE affiliate_id = v_affiliate_id AND business_id = v_business_id
+      AND status = 'approved' AND payout_id IS NULL;
+
+    RETURN NEXT v_payout;
+  END LOOP;
+
+  IF NOT v_any THEN
     RAISE EXCEPTION 'No payable commissions available to request';
   END IF;
-
-  INSERT INTO public.affiliate_payouts (affiliate_id, amount, status)
-  VALUES (v_affiliate_id, v_amount, 'requested')
-  RETURNING * INTO v_payout;
-
-  UPDATE public.affiliate_commissions
-  SET payout_id = v_payout.id
-  WHERE affiliate_id = v_affiliate_id AND status = 'approved' AND payout_id IS NULL;
-
-  RETURN v_payout;
 END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.request_affiliate_payout() TO authenticated;
 
--- A super_admin marks a payout request paid or rejected. 'paid' flips the
--- linked commissions to 'paid'; 'rejected' unlinks them (back to 'approved',
--- so they're requestable again in a future payout).
+-- The business that owes a payout marks it paid once cash has actually
+-- changed hands in person — or rejects it (e.g. a disputed referral) and
+-- unlinks its commissions so they're requestable again later. A
+-- super_admin can also step in for disputes, but the everyday actor here
+-- is the shop itself: it's their cash, not the platform's (see
+-- affiliate_payouts above). 'paid' flips the linked commissions to 'paid';
+-- 'rejected' unlinks them back to 'approved'.
 CREATE OR REPLACE FUNCTION public.set_affiliate_payout_status(p_payout_id uuid, p_status text)
 RETURNS public.affiliate_payouts
 LANGUAGE plpgsql
@@ -1627,10 +1760,22 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
+  v_uid uuid := auth.uid();
   v_payout public.affiliate_payouts;
+  v_is_owner boolean;
 BEGIN
-  IF public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'Only super admins can review payout requests';
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.affiliate_payouts p
+    JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.id = p_payout_id AND b.owner_id = v_uid
+  ) INTO v_is_owner;
+
+  IF NOT v_is_owner AND public.current_user_role() IS DISTINCT FROM 'super_admin' THEN
+    RAISE EXCEPTION 'Only the business that owes this payout (or a super admin) can review it';
   END IF;
 
   IF p_status NOT IN ('paid', 'rejected') THEN
@@ -1856,10 +2001,46 @@ GRANT EXECUTE ON FUNCTION public.place_order(jsonb, text, text, text, text) TO a
 
 -- ---- RLS ----
 
+-- SECURITY DEFINER (same reason as current_user_role() above) so this
+-- bypasses affiliate_payouts' own RLS internally instead of re-triggering
+-- it: affiliate_payouts_select_own_or_admin itself queries `affiliates` (to
+-- check a.user_id = auth.uid()), so an affiliates policy that queried
+-- affiliate_payouts as a plain subquery would call back into that policy,
+-- which calls back into this one, forever — Postgres reports that as
+-- "infinite recursion detected in policy for relation affiliates". Wrapping
+-- the check in a SECURITY DEFINER function breaks the cycle: it runs as the
+-- function owner, which — like every table here — isn't subject to RLS on
+-- tables it owns (no table in this schema uses FORCE ROW LEVEL SECURITY),
+-- so this reads affiliate_payouts/businesses directly with no policy
+-- re-entry at all.
+CREATE OR REPLACE FUNCTION public.business_owes_affiliate_payout(p_affiliate_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.affiliate_payouts p
+    JOIN public.businesses b ON b.id = p.business_id
+    WHERE p.affiliate_id = p_affiliate_id AND b.owner_id = auth.uid()
+  );
+$$;
+
 ALTER TABLE public.affiliates ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "affiliates_select_own_or_admin" ON public.affiliates;
 CREATE POLICY "affiliates_select_own_or_admin" ON public.affiliates FOR SELECT
-  USING (user_id = auth.uid() OR public.current_user_role() = 'super_admin');
+  USING (
+    user_id = auth.uid()
+    OR public.current_user_role() = 'super_admin'
+    -- A business owner needs to see who they're paying — full_name, code,
+    -- and payout_details (a contact number, see RegisterAffiliateForm) —
+    -- for any affiliate who actually has a payout request against them
+    -- (see /sell/affiliate-payouts). Without this, that page's embedded
+    -- `affiliates(...)` select silently comes back null for every row: the
+    -- payout amount still shows, but there's no name to put it against.
+    OR public.business_owes_affiliate_payout(affiliates.id)
+  );
 -- Row creation/status transitions happen only via register_affiliate() /
 -- set_affiliate_status() (SECURITY DEFINER), so there is no direct write policy.
 
@@ -1904,6 +2085,9 @@ DROP POLICY IF EXISTS "affiliate_payouts_select_own_or_admin" ON public.affiliat
 CREATE POLICY "affiliate_payouts_select_own_or_admin" ON public.affiliate_payouts FOR SELECT
   USING (
     EXISTS (SELECT 1 FROM public.affiliates a WHERE a.id = affiliate_payouts.affiliate_id AND a.user_id = auth.uid())
+    -- The business a payout is owed by needs to see it too — it's their
+    -- own /sell dashboard that lists "cash you owe" and marks it paid.
+    OR EXISTS (SELECT 1 FROM public.businesses b WHERE b.id = affiliate_payouts.business_id AND b.owner_id = auth.uid())
     OR public.current_user_role() = 'super_admin'
   );
 -- No write policy: written only via request_affiliate_payout() /
